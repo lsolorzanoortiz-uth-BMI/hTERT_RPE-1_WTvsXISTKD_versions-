@@ -1,6 +1,5 @@
 # Set CRAN mirror to avoid prompts during installation #####
 options(repos = c(CRAN = "https://cloud.r-project.org"))
-
 # Install WGCNA and dependencies from CRAN #####
 install.packages("WGCNA", dependencies = TRUE)
 
@@ -19,19 +18,20 @@ install.packages(c(
   'GOplot',           # Enrichment Analysis
   "gggenes",          # Plotting 
   "circlize",
-  "viridisLite",
+  "viridisLite",      # Color
   "ggridges",         # For visualizing the GSEA 
-  'VennDiagram'
+  'VennDiagram',      # Plotting sig results
+  "purrr",
+  "tidyestimate",     # For immune scoring 
+  "remotes",          # Dependency for immune scoring with omnideconv/immunedeconv
 ))
-
+remotes::install_github("omnideconv/immunedeconv")
 
 # Install Bioconductor packages #####
 BiocManager::install(c(
   "limma",            # For normalization and QC
-  "DESeq2",           # For data transformation
   "clusterProfiler",  # For functional enrichment analysis
   "org.Hs.eg.db",     # Human gene annotations
-  "GO.db",            # Gene Ontology database
   "STRINGdb",         # For protein-protein interaction networks
   "impute",           # Missing value imputation
   "preprocessCore",   # Low-level Preprocessing and Normalization
@@ -39,13 +39,12 @@ BiocManager::install(c(
   "AnnotationDbi",    # Database Interface/Query Tool
   "GEOquery",         # Downloads Data from NCBI Geodataset
   "biomaRt",          # To retrieve ESEMBL IDs
-  "GO.db",             # To retrieve Go ontology enrichment analysis
-  "karyoploteR",
-  "Gviz",
-  "EnhancedVolcano",
-  "ComplexHeatmap",
-  "rtracklayer"
+  "EnhancedVolcano",  # To plot and visualize DEG results 
+  "ComplexHeatmap",   # To visualize clusters in count data 
+  "ImmuneSigR",       # To get immune markers present in the sig results enriched in WT
+  "omnideconv/immunedeconv" # To get immune scoring 
 ))
+
 # Load required libraries #####
 library(WGCNA)
 library(ggplot2)
@@ -75,14 +74,20 @@ library(viridisLite)
 library(ggridges)
 library(VennDiagram)
 library(rtracklayer)
+library(DOSE)
+library(purrr)
+library(ImmuneSigR)
+library(tidyestimate)
+library(remotes)
+library(immunedeconv)
 
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
 # Set working directory #####
-setwd("/Users/luzsmac/Desktop/version_control/hTERT_RPE-1_GSE305810/hTERT_RPE-1_WTvsXISTKD_versions")
+setwd("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_WTvsXISTKD_versions ")
 
-if(!dir.exists("/Users/luzsmac/Desktop/version_control/hTERT_RPE-1_GSE305810/hTERT_RPE-1_WTvsXISTKD_versions/GSE305810")){
+if(!dir.exists("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_WTvsXISTKD_versions GSE305810")){
 # Loading Data #####
 getGEOSuppFiles("GSE305810")
   
@@ -106,12 +111,7 @@ count_data <- count_data[rowSums(count_data[, 5:last_col], na.rm = TRUE ) >0, ]
 rownames(count_data) <- count_data$Gene
 
 # Initializing useMart #####
-write.table(count_data$Gene, "count_data_genes")
-
-# Initializing useMart #####
-mart <- useEnsembl(biomart = "ensembl", 
-                      dataset = "hsapiens_gene_ensembl", 
-                      host = "oct2024.archive.ensembl.org")
+write.table(count_data$Gene, "count_data_genes.txt")
 
 # Cleaning sample info #####
 sample_info_cleaned <- data.frame(
@@ -161,7 +161,6 @@ test <- as.data.frame(fit3)
 # Getting chrom metadata #####
 chrom_metadata <- count_data$Chromosome
 
-
 # Results for Limma #####
 all_results <- topTable(
   fit3,
@@ -171,7 +170,7 @@ all_results <- topTable(
   adjust.method = "BH"
 )
 #Saving the limma results 
-write.table(all_results, file="all_results_limma_WT_vs_XISTKD", sep ="/t")
+write.table(all_results, file="all_results_limma_WT_vs_XISTKD.txt", sep ="/t")
 
 # Plotting the differential analysis results 
 all_results$status <- "Not significant"
@@ -329,7 +328,7 @@ sig_results <- all_results[which(all_results$adj.P.Val<0.05), ]
 count_data_sig <- count_data[rownames(sig_results), ]
 
 # Saving sig count_data #####
-write.table(count_data_sig, "sig_count_data", sep ="\t")
+write.table(count_data_sig, "sig_count_data.txt", sep ="\t")
 
 # Matrix sig #####
 matrix_sig <- matrix[rownames(sig_results), ]
@@ -449,7 +448,7 @@ gene_entrez <- bitr(cluster_annotation$SYMBOL,
 row.names(gene_entrez) <- gene_entrez$SYMBOL
 
 # Saving entrez of clusters 
-write.table(gene_entrez, file="All_Clusters_entrez", sep="\t")
+write.table(gene_entrez, file="All_Clusters_entrez.txt", sep="\t")
 
 #Getting the missing symbols #####
 missing_genes <- setdiff(cluster_annotation$SYMBOL, gene_entrez$SYMBOL)
@@ -512,7 +511,6 @@ barplot(arrange(go_enrichment_cluster_2, qvalue),
         title = "GO Enrichment in Cluster 2 XISTKD hTERT RPE-1 cells (GSE305810) ")
 dev.off()
 
-
 # Entrez ID for count_data 
 count_data_gene_entrez <- bitr(count_data$SYMBOL, 
                                fromType = "SYMBOL",
@@ -562,7 +560,8 @@ sig_genes_df <- data.frame(
   Symbol = rownames(count_data_sig),
   Chrom = count_data_sig$Chromosome
 )
-mart <- useEnsembl(biomart = "ensembl", 
+
+possibly(function(){mart <- useEnsembl(biomart = "ensembl", 
                    dataset = "hsapiens_gene_ensembl", 
                    host = "may2021.archive.ensembl.org")
 
@@ -591,9 +590,15 @@ formatting_strands <- function(x){
 
 # Calling formatting_strands #####
 sig_genes_coordinates$strand<-lapply(sig_genes_coordinates$strand, formatting_strands)
-
+# Formatting 
+sig_genes_coordinates$strand<-as.character(sig_genes_coordinates$strand)
 # Saving coordinates of sig genes 
-write.table(sig_genes_coordinates, file="sig_genes_coordinates", sep="\t")
+write.table(sig_genes_coordinates, file="sig_genes_coordinates.txt", sep="\t")
+return(sig_genes_coordinates)
+},
+otherwise=(
+  sig_genes_coordinates<-read.table("sig_genes_coordinates.txt")
+  ))
 
 # Df of unique genes #####                        
 sig_genes_coordinates_unique <- sig_genes_coordinates[!duplicated(sig_genes_coordinates$external_gene_name), ]
@@ -637,7 +642,7 @@ sig_genes_coordinates_unique_X_chrom <- filter(data.frame(sig_genes_coordinates_
 sig_genes_coordinates_unique_X_chrom[,'strand' ] <- as.character(sig_genes_coordinates_unique_X_chrom[,'strand' ])
 
 # Saving 
-write.table(sig_genes_coordinates_unique_X_chrom , file = "sig_genes_coordinates_unique_X_chrom",  col.names=TRUE, row.names= FALSE)
+write.table(sig_genes_coordinates_unique_X_chrom , file = "sig_genes_coordinates_unique_X_chrom.txt",  col.names=TRUE, row.names= FALSE)
 
 
 # Subseting key genes 
@@ -645,6 +650,7 @@ sig_results <- subset(all_results, adj.P.Val< 0.05)
 vec_MIR <- grep("MIR", rownames(sig_results), value = TRUE)
 vec_IL <- grep("IL", rownames(sig_results), value = TRUE)
 
+possibly(function(){
 # List of attributes available in mart
 attributes_df <- listAttributes(mart)
 
@@ -656,7 +662,7 @@ gene_function1 <- getBM(
   mart = mart
 )
 
-write.table(gene_function1, file="gene_function1_sig_results", sep="\t")
+write.table(gene_function1, file="gene_function1.txt", sep="\t")
 
 gene_function2 <- getBM(
   filters = "external_gene_name",
@@ -664,7 +670,12 @@ gene_function2 <- getBM(
   values = rownames(sig_results),
   mart = mart
 )
-write.table(gene_function2, file="gene_function2_sig_results", sep="\t")
+write.table(gene_function2, file="gene_function2.txt", sep="\t")
+return(attributes_df, gene_function1_sig_results, gene_function2_sig_results)},
+otherwise=(
+  gene_function1<- read.table("gene_function1.txt")
+  #gene_function2_sig_results ->read.table("gene_function2_sig_results.txt")
+))
 
 ## merge the adjusted p value and the logfold to the gene_function1 dataset and pivot longer by externl gene name 
 
@@ -699,27 +710,120 @@ search_terms_function <- "metabolism|immunity|autoimmunity|inflammation|pro-infl
 index_description_of_interest_WT_1006 <- grep(search_terms_function, gene_function1_subset$definition_1006) 
 index_description_of_interest_WT_goa_description <- grep(search_terms_function, gene_function1_subset$goslim_goa_description) 
 
+# Finding unique indices 
 unique_index_of_interest <- unique(index_description_of_interest_WT_1006,index_description_of_interest_WT_goa_description)
 
+# Gene function df of unique indices 
 gene_function1_subset_description_of_interest<- gene_function1_subset[unique_index_of_interest,  ]
 
-genes_of_interest <- unique(gene_function1_subset_description_of_interest)
-
+# retrieve sig results df for genes of interest
 sig_results_interest_immune_related_description <- sig_results[unique(genes_of_interest$external_gene_name) , ]
 
+# Initialize de gsea_do object
 gsea_do_df <- as.data.frame(gsea_do)
 
+# Retrieve markers 
 all_markers <- Get_Markers()
 
 all_markers_df <- data.frame(Marker = names(unlist(all_markers)),
                              Genes = unname(unlist(all_markers)))
 
+# Subset Markers in cluster 1 (WT)
 all_markers_df_cluster_WT <- subset(all_markers_df, Genes %in% cluster_1$SYMBOL)
+
+# Retrieve stats for markers
 all_markers_df_cluster_WT_limma_stats <- data.frame(all_markers_df_cluster_WT, sig_results[all_markers_df_cluster_WT$Genes, c(1,5)])
 
-immune_scores <- Score_ImmuneSigR(expr= count_data[, 5:ncol(count_data)],
-                 target_cells= NULL, 
-                 method= "rank")
+# Clean list of markers 
+all_markers_df_cluster_WT$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_WT$Marker)
+
+all_markers_df_cluster_WT$Markers_cleaned<-gsub(" ","_",all_markers_df_cluster_WT$Markers_cleaned )
+all_markers_df_cluster_WT$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_cluster_WT$Markers_cleaned )
+all_markers_df_cluster_WT$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_WT$Markers_cleaned )
+
+# Immune Scoring using Estimate 
+common_genes_count_data <-filter_common_genes(
+  df = matrix,
+  id = "hgnc_symbol",
+  tidy = FALSE,
+  tell_missing = TRUE,
+  find_alias = TRUE)
+
+
+# Wanted to know what genes were replaced with the official hgnc_symbol
+# Retrieving all gene mappings 
+gene_mapping_estimate <- data.frame(tidyestimate::common_genes)
+
+# Getting the genes in filter matrix/count data that are not in the original matrix/count data
+genes_with_aliases <- setdiff(common_genes_count_data$hgnc_symbol, rownames(matrix))
+
+# getting the gene mapping estimate df of the genes with aliases in the count data 
+gene_mapping_estimases_aliases_subset <-subset(gene_mapping_estimate,hgnc_symbol %in% genes_with_aliases)
+
+# Matrix of aliases 
+matrix_alias<-na.omit(matrix[gene_mapping_estimases_aliases_subset$external_synonym, ])
+
+# Mapping estimate of aliases 
+gene_mapping_estimate_of_aliases_matrix <-subset(gene_mapping_estimate, external_synonym %in% rownames(matrix_alias))
+
+# Returning significant groups if any
+t_test_list <- list()
+testing_significance_infliltration<-function(x){
+  
+# Calculate scores 
+estimate_immune_score <- estimate_score(x, is_affymetrix = FALSE) 
+# Define the groups
+estimate_immune_score$group <- c("WT","WT","WT",
+                                  "XISTAC","XISTAC","XISTAC","XISTAC")
+# Testing 
+t_test_list[1]<-t.test(stromal ~ group, data = estimate_immune_score)$p.value
+t_test_list[2]<- t.test(immune ~ group, data = estimate_immune_score)$p.value
+t_test_list[3]<-t.test(estimate ~ group, data = estimate_immune_score)$p.value
+
+# Adding results to a list 
+names(t_test_list)<- c(stromal_pvalue,immune_pvalue, estimate_pvalue)
+
+#Returning groups of significance
+index_rejects_the_null<- which(t_test_list< 0.05)
+if(length(index_rejects_the_null)>0){
+  return(t_test_list[index_rejects_the_null])
+}
+else{
+  return("No groups showed statistical significance with the estimate dataset")
+}}
+results<- testing_significance_infliltration(common_genes_count_data)
+print(results)
+
+# Estimate with immunedeconv still not significant!!
+immune_test <-immunedeconv::deconvolute(matrix, method="estimate", arrays= FALSE)
+colnames<- immune_test[,1]
+immune_test<-data.frame(t(immune_test[,2:ncol(immune_test)]))
+colnames(immune_test)<- unlist(unname(colnames))
+colnames(immune_test)<- gsub(" ", "_",colnames(immune_test))
+immune_test$group <- c("WT","WT","WT",
+                                 "XISTAC","XISTAC","XISTAC","XISTAC")
+# Testing 
+print(t.test(stroma_score ~ group, data = immune_test)$p.value)
+print(t.test(immune_score ~ group, data = immune_test)$p.value)
+print(t.test(estimate_score ~ group, data = immune_test)$p.value)
+print(t.test(tumor_purity ~ group, data = immune_test)$p.value)
+
+methods<- c(
+  "quantiseq",
+  "mcp_counter",
+  "xcell",
+  "epic",
+  "abis",
+  "estimate")
+immune_test_list <- list()
+for(i in seq_along(methods)){
+  if(methods[i] != "epic"){
+  immune_test_list[[i]] <-immunedeconv::deconvolute(matrix, method= methods[i], arrays= FALSE)
+  names(immune_test_list)[i]<-methods[i]}
+  else if(methods[i] == "epic"){
+    immune_test_list[[i]] <-immunedeconv::deconvolute(matrix, method= methods[i], arrays= FALSE,tumor=FALSE)
+    names(immune_test_list)[i]<- methods[i]}}
+save.image("Somatic_XIST_Practice.RData")
 
 # Fix immune_score 
 # Look at which genes are contributing to disease and sig enrichment pathways 
