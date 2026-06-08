@@ -462,7 +462,7 @@ write.table(gene_entrez, file="Data/All_Clusters_entrez.txt", sep="\t")
 missing_genes <- setdiff(cluster_annotation$SYMBOL, gene_entrez$SYMBOL)
 
 # Saving Symbols not mapped for documentation purposes #####
-write.table(missing_genes, "Genes_not_mapped_to_ENTREZID.txt")
+write.table(missing_genes, "Data/Genes_not_mapped_to_ENTREZID.txt")
 
 # subset for cluster 1 #####
 cluster_1 <- subset(cluster_annotation, Cluster == 1)
@@ -678,7 +678,7 @@ gene_function2 <- getBM(
   values = rownames(sig_results),
   mart = mart
 )
-write.table(gene_function2, file="gene_function2.txt", sep="\t")
+write.table(gene_function2, file="Data/gene_function2.txt", sep="\t")
 return(attributes_df, gene_function1, gene_function2)},
 otherwise=(
   gene_function1 <- fread("Data/gene_function1.txt.gz", sep="\t")
