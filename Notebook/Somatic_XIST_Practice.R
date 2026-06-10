@@ -87,8 +87,6 @@ library(data.table)
 library(tidyr)
 library(broom)
 
-
-
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
@@ -807,7 +805,41 @@ retrieving_stats<-function(df){
 for(i in seq_along(immune_test_list_stats)){
   assign(paste0("immune_",immune_test_names[i],"_df_stats"), data.frame(immune_test_list_stats[i]))
 }
+# Normality test  
+p_values<- c()
+shapiro<-function(current_df){
+  working_df<- current_df[ ,-1]
+    p_values <-lapply(working_df, function(x) shapiro.test(x)$p.value)
+  }
+normality_test_list <-lapply(immune_test_list, function(x) shapiro(x))
 
+# Iterate find test with normality , found test sets 2 and 6 to have normal cols 
+for(i in seq_along(normality_test_list)){
+  normal_found<-unlist(normality_test_list[[i]])>0.05
+  if(any(normal_found==TRUE)){
+    print(paste0(immune_test_names[[i]], " at index ", i, " in immune_test_names"))}
+}
+# Print which cols are normal in test sets 2 and 6
+mcp_counter_normal_cols<- which(normality_test_list[[2]]>=0.05)
+estimate_normal_cols <- which(normality_test_list[[6]]>=0.05)
+
+install.packages("fitdistrplus")
+library(fitdistrplus)
+
+distrubutions<- c("norm", "lnorm", "exp", "pois", "cauchy", "gamma", "logis", "nbinom", "geom", "beta", "weibull")
+
+
+descdist(df, discrete = FALSE) 
+dictribution_results<-list()
+retrieving_distribution_results<-function(df){
+  df%>%
+    select(-1)%>%
+      summarise(across(all_of(my_columns), list(fitdist(across(all_of(my_columns))), na.rm = TRUE))
+    )}
+lapply(immune_test_list, function(x) retrieving_distribution_results(x))  
+
+
+# Update t.test to something that desn't require normality 
 
 # Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
@@ -823,3 +855,4 @@ for(i in seq_along(immune_test_list_stats)){
 # Cytokines 
 # Back everything up
 # reproduce for KD cluster!!! def and 
+
