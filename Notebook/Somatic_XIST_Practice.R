@@ -26,7 +26,8 @@ install.packages(c(
   "remotes",          # Dependency for immune scoring with omnideconv/immunedeconv
   "data.table",       # File writing (.gz)
   "broom",            # Stats to tidy output
-  "tidyr"             # data wrangling 
+  "tidyr",            # data wrangling 
+  "stringr"
 ))
 remotes::install_github("omnideconv/immunedeconv")
 
@@ -86,7 +87,7 @@ library(immunedeconv)
 library(data.table)
 library(tidyr)
 library(broom)
-
+library(stringr)
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
@@ -162,8 +163,7 @@ fit2 <- contrasts.fit(fit, contrast_matrix)
 fit3 <- eBayes(fit2, trend = TRUE, robust = TRUE)
 # Summary of results #####
 results <- decideTests(fit3)
-summary(results)
-test <- as.data.frame(fit3)
+
 # Getting chrom metadata #####
 chrom_metadata <- count_data$Chromosome
 
@@ -748,7 +748,6 @@ all_markers_df_cluster_WT$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_clust
 all_markers_df_cluster_WT$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_WT$Markers_cleaned )
 
 # Using immunedeconv to test for immune score 
-# 
 methods<- c(
   "quantiseq",
   "mcp_counter",
@@ -771,40 +770,85 @@ for(i in seq_along(methods)){
     immune_test_list[[i]] <-immunedeconv::deconvolute(matrix, method= methods[i], arrays= FALSE,tumor=FALSE)
     immune_test_names[i]<- methods[i]}}
 
-#Extract each df 
-for(i in seq_along(immune_test_list)){
-  assign(paste0("immune_",immune_test_names[i],"_df"), data.frame(immune_test_list[i]))
-}
-
-# Preparing for statistical testing 
-Group <- c("WT","WT","WT","XISTAC","XISTAC","XISTAC","XISTAC")
-immune_test_list_stats<-list()
-retrieving_stats<-function(df){
-  col_1<-as.character(df[[1]])
+# Preparing for statistical testing return a list of all the dfs with the test info
+all_immune_test_list_with_metadata<- list()
+retrieving_stats<-function(df, name){
   df %>%
-  select(-1) %>%
-  t() %>%
-  data.frame() %>%
-  rename_with(function(x) col_1) %>%
-  mutate(Group = c("WT", "WT", "WT", "XISTAC", "XISTAC", "XISTAC", "XISTAC")) %>%
-  pivot_longer(cols = -Group, names_to = "variable", values_to = "value") %>%
-  
-  # Grouping by variable
-  group_by(variable) %>% 
-  
-  # T test between XISTKD and WT
-    summarise(
-      # Compares the groups against each other within each variable
-      p_val = t.test(value ~ Group, data = pick(value, Group))$p.value, 
-      .groups = "drop"
-    )}
-# Calling the stats function 
-  immune_test_list_stats <-lapply(immune_test_list, function(x) retrieving_stats(x))
+  data.frame()%>%
+    mutate(Test= rep(c(name), length.out = nrow(df)))}
 
-# Unpacking the results of the t test for each deconvolution method 
-for(i in seq_along(immune_test_list_stats)){
-  assign(paste0("immune_",immune_test_names[i],"_df_stats"), data.frame(immune_test_list_stats[i]))
-}
+# Calling the stats function 
+all_immune_test_list_with_metadata<-Map(retrieving_stats,immune_test_list,immune_test_names)
+
+# Binding all the results for each immune scoring test 
+all_immune_test_df_with_metadata<-c()
+for(i in seq_along(all_immune_test_list_with_metadata)){
+  all_immune_test_df_with_metadata<- rbind(all_immune_test_df_with_metadata,
+                                           all_immune_test_list_with_metadata[[i]])}
+# Creating rownames for matrix/df
+col1<- all_immune_test_df_with_metadata["cell_type"]
+test<- all_immune_test_df_with_metadata["Test"]
+
+# Creating rownames with cell_type and test info
+rownames_immune_tests<-unname(unlist(Map(paste0, col1,"_",test)))
+rownames_immune_tests<- gsub(" ", "_",rownames_immune_tests)
+rownames( all_immune_test_df_with_metadata)<- rownames_immune_tests
+
+# Limma for immune scoring
+
+# Metadata #####
+all_immune_test_matrix <- all_immune_test_df_with_metadata[-c(1,9)]
+
+group_names_immune_scoring = factor(c(
+  rep("WT",3),
+  rep("XIST_KD",4)
+))
+
+# Log Transform #####
+log_matrix_immune <- as.matrix(all_immune_test_matrix)
+
+# Construct Matrix #####
+design_immune <- model.matrix(~0 + group_names_immune_scoring)
+colnames(design_immune) <- levels(group_names_immune_scoring)
+
+# Fitting #####
+fit_immune <- lmFit(log_matrix_immune, design_immune, genes = all_immune_test_df_with_metadata[9])
+
+# Contrast #####
+contrast_matrix_immune <- makeContrasts(
+  WT_vs_XISTKD = WT-XIST_KD,
+  levels = design_immune
+)
+
+# Fitting with contrasts #####
+fit2_immune <- contrasts.fit(fit_immune, contrast_matrix_immune)
+
+# Fitting Ebayes #####
+fit3_immune <- eBayes(fit2_immune, trend = TRUE, robust = TRUE)
+
+# Summary of results #####
+results_immune <- decideTests(fit3_immune)
+
+# Results for Limma #####
+all_results_immune <- topTable(
+  fit3_immune,
+  coef = "WT_vs_XISTKD",
+  sort.by = "none",
+  n = Inf,
+  adjust.method = "BH"
+)
+
+# Subsetting by sig 
+all_results_immune_sig<-subset(all_results_immune, P.Value <0.05)
+
+## scale by row? 0-1 
+## transformation? 
+  
+  
+  
+  
+  
+### Test the entire df -col1 instead of each column ####  
 # Normality test  
 p_values<- c()
 shapiro<-function(current_df){
@@ -823,20 +867,6 @@ for(i in seq_along(normality_test_list)){
 mcp_counter_normal_cols<- which(normality_test_list[[2]]>=0.05)
 estimate_normal_cols <- which(normality_test_list[[6]]>=0.05)
 
-install.packages("fitdistrplus")
-library(fitdistrplus)
-
-distrubutions<- c("norm", "lnorm", "exp", "pois", "cauchy", "gamma", "logis", "nbinom", "geom", "beta", "weibull")
-
-
-descdist(df, discrete = FALSE) 
-dictribution_results<-list()
-retrieving_distribution_results<-function(df){
-  df%>%
-    select(-1)%>%
-      summarise(across(all_of(my_columns), list(fitdist(across(all_of(my_columns))), na.rm = TRUE))
-    )}
-lapply(immune_test_list, function(x) retrieving_distribution_results(x))  
 
 
 # Update t.test to something that desn't require normality 
