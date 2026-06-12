@@ -97,11 +97,13 @@ setwd("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_
 if(!dir.exists("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_WTvsXISTKD_versions /GSE305810")){
 # Loading Data #####
 getGEOSuppFiles("GSE305810")
-  
+
+}
+
 # Extract sample information (metadata) #####
 sample_info <- getGEO("GSE305810", GSEMatrix = TRUE)
 sample_info <- pData(sample_info[[1]])
-}
+  
 # List all files in the downloaded folder #####
 files <- list.files("GSE305810", full.names = TRUE)
 
@@ -793,84 +795,75 @@ test<- all_immune_test_df_with_metadata["Test"]
 rownames_immune_tests<-unname(unlist(Map(paste0, col1,"_",test)))
 rownames_immune_tests<- gsub(" ", "_",rownames_immune_tests)
 rownames( all_immune_test_df_with_metadata)<- rownames_immune_tests
+all_immune_test_df_with_metadata<- all_immune_test_df_with_metadata[rowSums(all_immune_test_df_with_metadata[, -c(1,9)], na.rm = TRUE ) >0, ] 
 
-# Limma for immune scoring
+## Performing Wilcoxon Rank-Sum Test with greater 
 
-# Metadata #####
-all_immune_test_matrix <- all_immune_test_df_with_metadata[-c(1,9)]
+# Retrieving cell_type + test names
+col_1 <-rownames(all_immune_test_df_with_metadata)
 
-group_names_immune_scoring = factor(c(
-  rep("WT",3),
-  rep("XIST_KD",4)
-))
+# Retrieving sample names 
+sample_names <- colnames(all_immune_test_df_with_metadata[ ,-c(1,9)])
 
-# Log Transform #####
-log_matrix_immune <- as.matrix(all_immune_test_matrix)
+# Running Wilcoxon Rank Sum, greater for each celltype+test WT vs XISTAC
 
-# Construct Matrix #####
-design_immune <- model.matrix(~0 + group_names_immune_scoring)
-colnames(design_immune) <- levels(group_names_immune_scoring)
+all_immune_test_df_wilcox_results<-all_immune_test_df_with_metadata %>%
+  select(-c(1,9)) %>%
+  t() %>%
+  data.frame() %>%
+  rename_with(function(x) col_1) %>%
+  mutate(group = c("WT", "WT", "WT", "XISTAC", "XISTAC", "XISTAC", "XISTAC"),
+         sample = sample_names) %>%
+  pivot_longer(cols = -c(group, sample), names_to = "variable", values_to = "value") %>%
+  group_by(variable) %>%
+  group_split() %>% # group and split by variable
+  set_names(map_chr(., ~ unique(.x$variable))) %>%  # set names to retain varIable name 
+  map(~ wilcox.test(value ~ group, data = ., alternative = "greater")) %>% # wilcoxon with greater 
+  map_dfr(~ tidy(.), .id = "variable") %>%
+  mutate(p.adjust=p.adjust(p.value, method = "BH")) %>% # FDR corection
+  rename(w_statistic =statistic)
 
-# Fitting #####
-fit_immune <- lmFit(log_matrix_immune, design_immune, genes = all_immune_test_df_with_metadata[9])
+# Adding r effect and direction 
+all_immune_test_fold_change_effect_size<-all_immune_test_df_wilcox_results %>%
+  left_join(
+    all_immune_test_df_with_metadata %>%
+      select(cell_type, Test) %>%
+      rename(variable = cell_type, method = Test),
+    by = "variable"
+  ) %>%
+  mutate(
+    direction = ifelse(w_statistic > 6, "WT > XISTAC", "XISTAC > WT"),
+    Z        = (w_statistic - (3*4/2)) / sqrt(3*4*(3+4+1)/12),
+    r_effect = abs(Z) / sqrt(3+4),  
+    magnitude = case_when(
+      abs(r_effect) >= 0.50 ~ "large",
+      abs(r_effect) >= 0.30 ~ "medium",
+      abs(r_effect) >= 0.10 ~ "small",
+      TRUE                  ~ "negligible")
+  ) %>%
+  filter(direction == "WT > XISTAC") %>%   # consistent with your hypothesis
+  arrange(desc(abs(r_effect)))
 
-# Contrast #####
-contrast_matrix_immune <- makeContrasts(
-  WT_vs_XISTKD = WT-XIST_KD,
-  levels = design_immune
-)
+sig_all_immune_test_fold_change_effect_size<-subset(all_immune_test_fold_change_effect_size, p.value<0.05)
 
-# Fitting with contrasts #####
-fit2_immune <- contrasts.fit(fit_immune, contrast_matrix_immune)
+sig_immune_test_df_with_metadata<-all_immune_test_df_with_metadata[sig_all_immune_test_fold_change_effect_size$variable, ]
 
-# Fitting Ebayes #####
-fit3_immune <- eBayes(fit2_immune, trend = TRUE, robust = TRUE)
-
-# Summary of results #####
-results_immune <- decideTests(fit3_immune)
-
-# Results for Limma #####
-all_results_immune <- topTable(
-  fit3_immune,
-  coef = "WT_vs_XISTKD",
-  sort.by = "none",
-  n = Inf,
-  adjust.method = "BH"
-)
-
-# Subsetting by sig 
-all_results_immune_sig<-subset(all_results_immune, P.Value <0.05)
-
-## scale by row? 0-1 
-## transformation? 
-  
-  
-  
-  
-  
-### Test the entire df -col1 instead of each column ####  
-# Normality test  
-p_values<- c()
-shapiro<-function(current_df){
-  working_df<- current_df[ ,-1]
-    p_values <-lapply(working_df, function(x) shapiro.test(x)$p.value)
-  }
-normality_test_list <-lapply(immune_test_list, function(x) shapiro(x))
-
-# Iterate find test with normality , found test sets 2 and 6 to have normal cols 
-for(i in seq_along(normality_test_list)){
-  normal_found<-unlist(normality_test_list[[i]])>0.05
-  if(any(normal_found==TRUE)){
-    print(paste0(immune_test_names[[i]], " at index ", i, " in immune_test_names"))}
+if(all.equal(rownames(sig_immune_test_df_with_metadata), sig_all_immune_test_fold_change_effect_size$variable)){
+  sig_all_immune_test_fold_change_effect_size["cell_type"] <- sig_immune_test_df_with_metadata$cell_type
 }
-# Print which cols are normal in test sets 2 and 6
-mcp_counter_normal_cols<- which(normality_test_list[[2]]>=0.05)
-estimate_normal_cols <- which(normality_test_list[[6]]>=0.05)
 
+### revise to pick the correct df to subset 
+unique(sig_all_immune_test_fold_change_effect_size$cell_type)
+search_term_cells<-"B_cell|B_cell_memory|plasma|Basophil|Eosinophil|M1|	Myeloid Dendritic|Neutrophil|CD4 T-cell/Memory|CD8 T-cell/Memory"
 
+subset_markers_sig_cell_deconvolution <-all_markers_df_cluster_WT[grep(search_term_cells,all_markers_df_cluster_WT$Marker), ]
+sig_results_sig_cell_deconvolution <-sig_results[subset_markers_sig_cell_deconvolution$Genes, ]
 
-# Update t.test to something that desn't require normality 
+# Actually one cot encode???
+gene_one_hot_encoded <- WT_enrichment %>% separate_wider_delim(geneID, delim = "/", names_sep = "",
+                                                             too_few="align_start", names_repair = "universal" )  
 
+grep(rownames(sig_results_sig_cell_deconvolution), gene_one_hot_encoded)
 # Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
 # Add anything to search terms? lipoprotein 
