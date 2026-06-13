@@ -29,7 +29,6 @@ install.packages(c(
   "tidyr",            # data wrangling 
   "stringr"
 ))
-remotes::install_github("omnideconv/immunedeconv")
 
 # Install Bioconductor packages #####
 BiocManager::install(c(
@@ -88,6 +87,7 @@ library(data.table)
 library(tidyr)
 library(broom)
 library(stringr)
+
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
@@ -743,12 +743,33 @@ all_markers_df_cluster_WT <- subset(all_markers_df, Genes %in% cluster_1$SYMBOL)
 all_markers_df_cluster_WT_limma_stats <- data.frame(all_markers_df_cluster_WT, sig_results[all_markers_df_cluster_WT$Genes, c(1,5)])
 
 # Clean list of markers 
-all_markers_df_cluster_WT$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_WT$Marker)
+all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_WT$Marker)
 
-all_markers_df_cluster_WT$Markers_cleaned<-gsub(" ","_",all_markers_df_cluster_WT$Markers_cleaned )
-all_markers_df_cluster_WT$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_cluster_WT$Markers_cleaned )
-all_markers_df_cluster_WT$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_WT$Markers_cleaned )
+all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub(" ","_",all_markers_df_cluster_WT_limma_stats$Markers_cleaned )
+all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_cluster_WT_limma_stats$Markers_cleaned )
+all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_WT_limma_stats$Markers_cleaned )
 
+
+# Subset Markers in cluster 1 (XISTKD)
+all_markers_df_cluster_XISTKD <- subset(all_markers_df, Genes %in% cluster_2$SYMBOL)
+
+# Retrieve stats for markers
+all_markers_df_cluster_XISTKD_limma_stats <- data.frame(all_markers_df_cluster_XISTKD, sig_results[all_markers_df_cluster_XISTKD$Genes, c(1,5)])
+
+# Clean list of markers 
+all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_XISTKD$Marker)
+
+all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub(" ","_",all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned )
+all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned )
+all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned )
+
+
+
+
+
+
+
+# Adding 
 # Using immunedeconv to test for immune score 
 methods<- c(
   "quantiseq",
@@ -823,6 +844,7 @@ all_immune_test_df_wilcox_results<-all_immune_test_df_with_metadata %>%
   mutate(p.adjust=p.adjust(p.value, method = "BH")) %>% # FDR corection
   rename(w_statistic =statistic)
 
+
 # Adding r effect and direction 
 all_immune_test_fold_change_effect_size<-all_immune_test_df_wilcox_results %>%
   left_join(
@@ -839,31 +861,65 @@ all_immune_test_fold_change_effect_size<-all_immune_test_df_wilcox_results %>%
       abs(r_effect) >= 0.50 ~ "large",
       abs(r_effect) >= 0.30 ~ "medium",
       abs(r_effect) >= 0.10 ~ "small",
-      TRUE                  ~ "negligible")
-  ) %>%
-  filter(direction == "WT > XISTAC") %>%   # consistent with your hypothesis
-  arrange(desc(abs(r_effect)))
+      TRUE                  ~ "negligible"))
+  
+# Adding cell_type to the Wilcoxon test with effect size 
+# Reordering all_immune_test_df_with_metadata
+all_immune_test_df_with_metadata<-all_immune_test_df_with_metadata[all_immune_test_fold_change_effect_size$variable, ]
 
-sig_all_immune_test_fold_change_effect_size<-subset(all_immune_test_fold_change_effect_size, p.value<0.05)
+# Testing for row order and adding cell info
+if(all.equal(all_immune_test_fold_change_effect_size$variable, rownames(all_immune_test_df_with_metadata))){
+  all_immune_test_fold_change_effect_size["cell_type"] <- all_immune_test_df_with_metadata$cell_type}
 
-sig_immune_test_df_with_metadata<-all_immune_test_df_with_metadata[sig_all_immune_test_fold_change_effect_size$variable, ]
+# Retrieving dfs, splitting by direction 
+unique_cell_types_deconvolution <- unique(all_immune_test_fold_change_effect_size["cell_type"])
 
-if(all.equal(rownames(sig_immune_test_df_with_metadata), sig_all_immune_test_fold_change_effect_size$variable)){
-  sig_all_immune_test_fold_change_effect_size["cell_type"] <- sig_immune_test_df_with_metadata$cell_type
-}
+# Cells that are statistically more significant in WT 
+cell_deconvolution_upregulated_in_WT<- subset(all_immune_test_fold_change_effect_size, direction == "WT > XISTAC")
 
-### revise to pick the correct df to subset 
-unique(sig_all_immune_test_fold_change_effect_size$cell_type)
-search_term_cells<-"B_cell|B_cell_memory|plasma|Basophil|Eosinophil|M1|	Myeloid Dendritic|Neutrophil|CD4 T-cell/Memory|CD8 T-cell/Memory"
+# Cells that are statistically more significant in XIST KD
+cell_deconvolution_upregulated_in_XISTKD<- subset(all_immune_test_fold_change_effect_size, direction == "XISTAC > WT")
 
-subset_markers_sig_cell_deconvolution <-all_markers_df_cluster_WT[grep(search_term_cells,all_markers_df_cluster_WT$Marker), ]
-sig_results_sig_cell_deconvolution <-sig_results[subset_markers_sig_cell_deconvolution$Genes, ]
+# Retrieving unique cells in each df split above 
+unique_cells_WT<-cell_deconvolution_upregulated_in_WT %>%
+                              select(cell_type) %>%
+                              unique() %>%
+                              data.frame() 
+
+
+unique_cells_XISTKD<-cell_deconvolution_upregulated_in_XISTKD %>%
+                            select(cell_type) %>%
+                            unique() %>%
+                            data.frame() 
+
+
+
 
 # Actually one cot encode???
 gene_one_hot_encoded <- WT_enrichment %>% separate_wider_delim(geneID, delim = "/", names_sep = "",
                                                              too_few="align_start", names_repair = "universal" )  
+names(gene_one_hot_encoded )
+install.packages("fastDummies")
+library(fastDummies)
+# Creating dummies for each gene column 
+gene_cols <- c(
+  "geneID1", "geneID2", "geneID3", "geneID4", "geneID5", "geneID6", "geneID7", "geneID8",
+  "geneID9", "geneID10", "geneID11", "geneID12", "geneID13", "geneID14", "geneID15", "geneID16",
+  "geneID17", "geneID18", "geneID19", "geneID20", "geneID21", "geneID22", "geneID23", "geneID24",
+  "geneID25", "geneID26", "geneID27", "geneID28", "geneID29", "geneID30", "geneID31", "geneID32",
+  "geneID33", "geneID34", "geneID35", "geneID36", "geneID37", "geneID38", "geneID39", "geneID40",
+  "geneID41", "geneID42", "geneID43", "geneID44", "geneID45", "geneID46", "geneID47"
+)
 
-grep(rownames(sig_results_sig_cell_deconvolution), gene_one_hot_encoded)
+df_encoded <- dummy_cols(gene_one_hot_encoded, select_columns = gene_cols, remove_selected_columns = TRUE)
+rownames(df_encoded)<- df_encoded$Description
+# clean up names of the one hot encoded col 
+
+## write an assertgioxn test just to check for correct one hot encoding 
+test<- df_encoded[ ,c(1,2,which(df_encoded["purine ribonucleotide metabolic process", ]== 1)) ]
+
+# Update function subsettig, no need 
+## Add cyber scores 
 # Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
 # Add anything to search terms? lipoprotein 
