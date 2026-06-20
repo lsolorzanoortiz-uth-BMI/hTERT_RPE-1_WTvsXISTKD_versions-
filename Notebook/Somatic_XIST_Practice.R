@@ -26,8 +26,9 @@ install.packages(c(
   "remotes",          # Dependency for immune scoring with omnideconv/immunedeconv
   "data.table",       # File writing (.gz)
   "broom",            # Stats to tidy output
-  "tidyr",            # data wrangling 
-  "stringr"
+  "tidyr",            # Data wrangling 
+  "stringr",          # String manipulation
+  "fastDummies"      # One hot encoding/Dummy variables 
 ))
 
 # Install Bioconductor packages #####
@@ -87,6 +88,8 @@ library(data.table)
 library(tidyr)
 library(broom)
 library(stringr)
+library(fastDummies)
+
 
 # Increasing timeout cutoff 
 options(timeout = 1200)
@@ -763,12 +766,6 @@ all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub(" ","_",all_mark
 all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("/|-|,","_",all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned )
 all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("__","_",all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned )
 
-
-
-
-
-
-
 # Adding 
 # Using immunedeconv to test for immune score 
 methods<- c(
@@ -895,30 +892,130 @@ unique_cells_XISTKD<-cell_deconvolution_upregulated_in_XISTKD %>%
 
 
 
-# Actually one cot encode???
-gene_one_hot_encoded <- WT_enrichment %>% separate_wider_delim(geneID, delim = "/", names_sep = "",
-                                                             too_few="align_start", names_repair = "universal" )  
-names(gene_one_hot_encoded )
-install.packages("fastDummies")
-library(fastDummies)
+# Separate Wider to One hot encode 
+pathway_genes_wider_WT <- WT_enrichment %>% separate_wider_delim(geneID, delim = "/", names_sep = "",
+                                                       too_few="align_start", names_repair = "universal" )  
+
+# Retrieving cols to one hot encode 
+gene_cols_WT <- paste0("geneID", seq_along(1:47))
+
+# Retrieving list of unique genes 
+
+all_genes_pathway_vector_WT<- c()
+removing_dups<-function(x){
+  all_genes_pathway_vector_WT<-c(all_genes_pathway_vector_WT,x)
+}
+vector_of_all_genes_in_pathway_WT<-lapply(pathway_genes_wider_WT[,gene_cols_WT], function(x) removing_dups(x))
+vector_unique_genes_pathway_WT<-unique(unlist(vector_of_all_genes_in_pathway_WT))
+
 # Creating dummies for each gene column 
-gene_cols <- c(
-  "geneID1", "geneID2", "geneID3", "geneID4", "geneID5", "geneID6", "geneID7", "geneID8",
-  "geneID9", "geneID10", "geneID11", "geneID12", "geneID13", "geneID14", "geneID15", "geneID16",
-  "geneID17", "geneID18", "geneID19", "geneID20", "geneID21", "geneID22", "geneID23", "geneID24",
-  "geneID25", "geneID26", "geneID27", "geneID28", "geneID29", "geneID30", "geneID31", "geneID32",
-  "geneID33", "geneID34", "geneID35", "geneID36", "geneID37", "geneID38", "geneID39", "geneID40",
-  "geneID41", "geneID42", "geneID43", "geneID44", "geneID45", "geneID46", "geneID47"
-)
+pathway_genes_one_hot_encoded_WT <- dummy_cols(pathway_genes_wider_WT, select_columns = gene_cols_WT, remove_selected_columns = TRUE)
 
-df_encoded <- dummy_cols(gene_one_hot_encoded, select_columns = gene_cols, remove_selected_columns = TRUE)
-rownames(df_encoded)<- df_encoded$Description
-# clean up names of the one hot encoded col 
+# Name rownames for easy data manipulation
+rownames(pathway_genes_one_hot_encoded_WT)<- pathway_genes_one_hot_encoded_WT$Description ### Fix 
 
-## write an assertgioxn test just to check for correct one hot encoding 
-test<- df_encoded[ ,c(1,2,which(df_encoded["purine ribonucleotide metabolic process", ]== 1)) ]
+# Remove NA cols after encoding 
+pathway_genes_one_hot_encoded_WT<-pathway_genes_one_hot_encoded_WT[ ,  -(grep("geneID\\d+_NA",names(pathway_genes_one_hot_encoded_WT)))]
 
-# Update function subsettig, no need 
+## Write an assertion test just to check for correct one hot encoding 
+#test_1<- pathway_genes_one_hot_encoded[ "purine ribonucleotide metabolic process",c(1:11,which(pathway_genes_one_hot_encoded["purine ribonucleotide metabolic process", ]== 1)) ]
+#test-2 <- pathway_genes_one_hot_encoded[]
+#stopifnot(
+#all.equal(test_1, test_2)
+#)
+ ###########################
+
+# Gene cols one hot encoded 
+
+
+# Renaming one hot encoded genes
+pathway_genes_one_hot_encoded_cols_only_WT<- gsub("[geneID0-9]*_([A-Za-z0-9]+)", "\\1",names(pathway_genes_one_hot_encoded_WT)[12:ncol(pathway_genes_one_hot_encoded_WT)])
+last_col<-dim(pathway_genes_one_hot_encoded_WT)[2]
+names(pathway_genes_one_hot_encoded_WT)[12:last_col] <- pathway_genes_one_hot_encoded_cols_only_WT
+
+# Dropping non gene cols 
+genes_only_pathway_onehot_encoded<-pathway_genes_one_hot_encoded_WT[12: last_col]
+non_gene_data <-pathway_genes_one_hot_encoded_WT[1:11]
+# Order colnames in alphabetical order
+genes_only_pathway_onehot_encoded<-genes_only_pathway_onehot_encoded[order(colnames(genes_only_pathway_onehot_encoded))]
+
+# Consolidate duplicated cols 
+index_list_TRUE <- list() # To store all the indices that have val ==1
+True_at_i<-c() # To store the indices per consolidated col that have val==1
+target <-1
+last_col_df<- ncol(genes_only_pathway_onehot_encoded)
+length_unique_names <- length(unique(names(genes_only_pathway_onehot_encoded))) # To keep track of how many cols I retrieve 
+k=1 #Counter for unique cols
+for(i in 1:last_col_df){
+  
+ if(i==1){
+   index<- which(genes_only_pathway_onehot_encoded[ , i]== 1) 
+   True_at_i <- c(True_at_i,index) # Adds col 1 to the per unique col vector 
+ }
+
+ if(i!=1){
+   index_at_i<-i
+   index_at_i_minus <-(index_at_i-1)
+   # Evaluates consecutive colnames
+   boolean_index<-(names(genes_only_pathway_onehot_encoded)[index_at_i]==names(genes_only_pathway_onehot_encoded)[index_at_i_minus])
+   
+   # If consecutive names are the same add to per unique col vector
+   if( boolean_index==TRUE){
+     True_at_i <-c(True_at_i, which(genes_only_pathway_onehot_encoded[ , index_at_i]== target))
+   }
+   # If consecutive names are not the same add to list of unique cols with index at which val ==1 
+   if(boolean_index==FALSE){
+     if(k !=length_unique_names){
+      index_list_TRUE[[k]]<-True_at_i # Add first
+      unique_names[[k]]<-unique_names[k] # Keeping track of the unique colname order
+      True_at_i <-c() # Restart vector per col
+      True_at_i <-c(True_at_i, which(genes_only_pathway_onehot_encoded[ , index_at_i]== target)) # Evaluate then add 
+      k=k+1 # Add to the index in uniqe colnames
+     }
+     if(k ==length_unique_names){ # if last unique col add
+       index_list_TRUE[[k]]<- True_at_i
+       unique_names[[k]]<-unique_names[k] # Keeping track of the unique colname order
+     }
+   }
+ }
+}
+
+# Check lengths of unique names found by the unique function and the iterative function
+stopifnot(length(index_list_TRUE)==length_unique_names & (length_unique_names== length(unique_names)))
+
+# Checking for order of names of unique cols that were merged 
+stopifnot(all.equal(unique_names,unique_names))
+
+# Checking for proper consolidation 
+target<- 1
+cbinded_vectors<- c()
+vector<- rep(0,157)
+for(i in seq_along(1:length(index_list_TRUE))){
+  vector<- rep(0,157)
+  current_cols_index_TRUE<-unlist(index_list_TRUE[i])
+  vector[current_cols_index_TRUE]<-1
+  cbinded_vectors<-cbind(cbinded_vectors,vector)
+}
+df_not_dup_cols<-data.frame(cbinded_vectors)
+if(dim(df_not_dup_cols)[2]== length(unique_names)){
+names(df_not_dup_cols)<-unique_names}
+
+
+random_nums_to_test_merge<-sample(ncol(df_not_dup_cols), size = 20, replace = FALSE)
+test_merge<-function(ran){
+all.equal(sort(which(df_not_dup_cols[ ,ran]==1)),sort(unlist(index_list_TRUE[ran])))
+}
+
+results<-lapply(random_nums_to_test_merge,function(x) test_merge(x))
+
+
+stopifnot(length(which(results==FALSE))==0)
+
+cleaned_pathway_df_WT<-data.frame(cbind(non_gene_data ,df_not_dup_cols))
+## Pivot longer and add all_markers_df_cluster_WT_limma_stats data 
+
+
+
 ## Add cyber scores 
 # Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
