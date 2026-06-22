@@ -906,16 +906,23 @@ removing_dups<-function(x){
   all_genes_pathway_vector_WT<-c(all_genes_pathway_vector_WT,x)
 }
 vector_of_all_genes_in_pathway_WT<-lapply(pathway_genes_wider_WT[,gene_cols_WT], function(x) removing_dups(x))
+# Retrieve unique gene names 
 vector_unique_genes_pathway_WT<-unique(unlist(vector_of_all_genes_in_pathway_WT))
+# Remove duplicates 
+vector_unique_genes_pathway_WT<-sort(vector_unique_genes_pathway_WT[which(!is.na(vector_unique_genes_pathway_WT))])
 
 # Creating dummies for each gene column 
 pathway_genes_one_hot_encoded_WT <- dummy_cols(pathway_genes_wider_WT, select_columns = gene_cols_WT, remove_selected_columns = TRUE)
 
-# Name rownames for easy data manipulation
-rownames(pathway_genes_one_hot_encoded_WT)<- pathway_genes_one_hot_encoded_WT$Description ### Fix 
+
+##Setting rownames 
+rownames(pathway_genes_one_hot_encoded_WT) <- pathway_genes_one_hot_encoded_WT$Description
+description <-pathway_genes_one_hot_encoded_WT$Description 
 
 # Remove NA cols after encoding 
-pathway_genes_one_hot_encoded_WT<-pathway_genes_one_hot_encoded_WT[ ,  -(grep("geneID\\d+_NA",names(pathway_genes_one_hot_encoded_WT)))]
+pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT[ ,  -(grep("geneID\\d+_NA$",names(pathway_genes_one_hot_encoded_WT)))]
+
+
 
 ## Write an assertion test just to check for correct one hot encoding 
 #test_1<- pathway_genes_one_hot_encoded[ "purine ribonucleotide metabolic process",c(1:11,which(pathway_genes_one_hot_encoded["purine ribonucleotide metabolic process", ]== 1)) ]
@@ -927,24 +934,33 @@ pathway_genes_one_hot_encoded_WT<-pathway_genes_one_hot_encoded_WT[ ,  -(grep("g
 
 # Gene cols one hot encoded 
 
-
 # Renaming one hot encoded genes
 pathway_genes_one_hot_encoded_cols_only_WT<- gsub("[geneID0-9]*_([A-Za-z0-9]+)", "\\1",names(pathway_genes_one_hot_encoded_WT)[12:ncol(pathway_genes_one_hot_encoded_WT)])
 last_col<-dim(pathway_genes_one_hot_encoded_WT)[2]
 names(pathway_genes_one_hot_encoded_WT)[12:last_col] <- pathway_genes_one_hot_encoded_cols_only_WT
-
 # Dropping non gene cols 
-genes_only_pathway_onehot_encoded<-pathway_genes_one_hot_encoded_WT[12: last_col]
+genes_only_pathway_onehot_encoded <-pathway_genes_one_hot_encoded_WT[12: last_col]
+
+#Keeping rownames
+
+
+#Gene info only 
 non_gene_data <-pathway_genes_one_hot_encoded_WT[1:11]
+
 # Order colnames in alphabetical order
-genes_only_pathway_onehot_encoded<-genes_only_pathway_onehot_encoded[order(colnames(genes_only_pathway_onehot_encoded))]
+genes_only_pathway_onehot_encoded <-genes_only_pathway_onehot_encoded[order(colnames(genes_only_pathway_onehot_encoded))]
+
+all.equal(rownames(genes_only_pathway_onehot_encoded),non_gene_data)
+## Index check!!!!
+all.equal(rownames(pathway_genes_one_hot_encoded_WT), rownames(non_gene_data))
 
 # Consolidate duplicated cols 
 index_list_TRUE <- list() # To store all the indices that have val ==1
 True_at_i<-c() # To store the indices per consolidated col that have val==1
 target <-1
 last_col_df<- ncol(genes_only_pathway_onehot_encoded)
-length_unique_names <- length(unique(names(genes_only_pathway_onehot_encoded))) # To keep track of how many cols I retrieve 
+unique_names <- unique(names(genes_only_pathway_onehot_encoded))
+length_unique_names <- length(unique_names) # To keep track of how many cols I retrieve 
 k=1 #Counter for unique cols
 for(i in 1:last_col_df){
   
@@ -984,35 +1000,64 @@ for(i in 1:last_col_df){
 stopifnot(length(index_list_TRUE)==length_unique_names & (length_unique_names== length(unique_names)))
 
 # Checking for order of names of unique cols that were merged 
-stopifnot(all.equal(unique_names,unique_names))
+stopifnot(all.equal(unique_names, vector_unique_genes_pathway_WT))
+length(unique(unique_names))
+length(unique(vector_unique_genes_pathway_WT))
+setdiff(unique_names,vector_unique_genes_pathway_WT)
 
 # Checking for proper consolidation 
 target<- 1
 cbinded_vectors<- c()
 vector<- rep(0,157)
+
 for(i in seq_along(1:length(index_list_TRUE))){
   vector<- rep(0,157)
-  current_cols_index_TRUE<-unlist(index_list_TRUE[i])
-  vector[current_cols_index_TRUE]<-1
-  cbinded_vectors<-cbind(cbinded_vectors,vector)
+  current_cols_index_TRUE<-unlist(index_list_TRUE[i]) # Retrieve the indices that are TRUE for each gene
+  vector[current_cols_index_TRUE]<- target # Adding the the target to the indices for each col
+  cbinded_vectors<-cbind(cbinded_vectors,vector) # bind all the cols together 
 }
-df_not_dup_cols<-data.frame(cbinded_vectors)
-if(dim(df_not_dup_cols)[2]== length(unique_names)){
+df_not_dup_cols<-data.frame(cbinded_vectors) # Convert to df 
+if(dim(df_not_dup_cols)[2]== length(unique_names)){ # Check for the correct # of cols 
 names(df_not_dup_cols)<-unique_names}
 
-
-random_nums_to_test_merge<-sample(ncol(df_not_dup_cols), size = 20, replace = FALSE)
+# Creating random 20 random numbers from 1 to 329 for each column. 
+random_nums_to_test_merge<-sample(ncol(df_not_dup_cols), size = 20, replace = FALSE) # Random sampling to check for proper consolidation 
 test_merge<-function(ran){
 all.equal(sort(which(df_not_dup_cols[ ,ran]==1)),sort(unlist(index_list_TRUE[ran])))
 }
 
-results<-lapply(random_nums_to_test_merge,function(x) test_merge(x))
+results<-lapply(random_nums_to_test_merge,function(x) test_merge(x)) # Retrieve results of the consolidation test 
 
 
-stopifnot(length(which(results==FALSE))==0)
+stopifnot(length(which(results==FALSE))==0) # Stop if any tests came out not equal/FALSE 
 
-cleaned_pathway_df_WT<-data.frame(cbind(non_gene_data ,df_not_dup_cols))
-## Pivot longer and add all_markers_df_cluster_WT_limma_stats data 
+# Index check 
+all.equal(non_gene_data$Description, description)
+
+# Merge df with pathway info
+WT_cleaned_pathway_genes_df<-data.frame(non_gene_data, df_not_dup_cols)
+
+# Making sure all the genes are present
+setdiff( unique(markers_pathway_WT$Genes) , cluster_1$SYMBOL)
+setdiff(unique(all_markers_df_cluster_WT_limma_stats$Genes), cluster_1$SYMBOL)
+
+markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
+  pivot_longer(
+    cols= c(12:340),
+    names_to= "Genes",
+    values_to= "value") %>%
+    filter(value ==1) %>%
+    full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
+    left_join(all_results, by= "Genes")
+    
+all_results[ "Genes"]<- rownames(all_results)
+
+cytoplasmic_translation_genes<-markers_pathway_WT %>%
+                              filter(Description == "cytoplasmic translation")
+
+
+
+# Pivot longer and add all_markers_df_cluster_WT_limma_stats data 
 
 
 
