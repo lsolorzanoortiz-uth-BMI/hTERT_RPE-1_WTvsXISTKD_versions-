@@ -90,7 +90,6 @@ library(broom)
 library(stringr)
 library(fastDummies)
 
-
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
@@ -692,40 +691,23 @@ otherwise=(
 
 # Df of cluster 1 enrichment 
 WT_enrichment <- as.data.frame(go_enrichment_cluster_1)
-
-# Retriving key genes 
-phagy_index <- grep("phag", WT_enrichment$Description)
-kinase_index <- grep("kinase", WT_enrichment$Description)
-oxy_index <- grep("oxy", WT_enrichment$Description)
-
-# Building the search term 
-search_term <- "pag|kinase|oxygen|hypoxia|cata|substrate|ER|interleukin|stress|tyrosine|transferase|vacuole|steroid|bacteria "
-
-# Retrieving genes that match the search term 
-index_enrichment_retrieval <- grep(search_term, WT_enrichment$Description)
-WT_enrichment_subset <- WT_enrichment[index_enrichment_retrieval, ]
-
-# Retrieving gene names and cleaning 
-WT_genes_of_interest <- WT_enrichment_subset$geneID
-WT_genes_of_interest <- sapply(WT_genes_of_interest, function(x) gsub("/", ",", x))
-WT_genes_of_interest <- strsplit(WT_genes_of_interest, split =",")
-WT_genes_of_interest <- unlist(unname(WT_genes_of_interest))
+############## Delete?
 
 # Subsetting the gene_function1 df with genes of interest from cluster2
-gene_function1_subset <- subset(gene_function1, external_gene_name %in% WT_genes_of_interest)
+gene_function1_subset_WT <- subset(gene_function1, external_gene_name %in% cluster_1$SYMBOL)
 
 # Building the search term of functions 
 search_terms_function <- "metabolism|immunity|autoimmunity|inflammation|pro-inflammatory|cytok|defense|bacteria|interleukin|immune"
 
 # Retrieving the index that match the search terms 
-index_description_of_interest_WT_1006 <- grep(search_terms_function, gene_function1_subset$definition_1006) 
-index_description_of_interest_WT_goa_description <- grep(search_terms_function, gene_function1_subset$goslim_goa_description) 
+index_description_of_interest_WT_1006 <- grep(search_terms_function, gene_function1_subset_WT$definition_1006) 
+index_description_of_interest_WT_goa_description <- grep(search_terms_function, gene_function1_subset_WT$goslim_goa_description) 
 
 # Finding unique indices in genes and descrition of interest in 1006 and goslim 
 unique_index_of_interest <- unique(index_description_of_interest_WT_1006,index_description_of_interest_WT_goa_description)
 
 # Gene function df of unique indices 
-gene_function1_subset_description_of_interest<- gene_function1_subset[unique_index_of_interest,  ]
+gene_function1_subset_description_of_interest<- gene_function1_subset_WT[unique_index_of_interest,  ]
 
 # Retrieve sig results df for genes of interest based on 1006 function and goslim goa description of cluster 1 genes that match immune descriptions 
 sig_results_interest_immune_related_description <- sig_results[unique(gene_function1_subset_description_of_interest$external_gene_name) , ]
@@ -914,10 +896,11 @@ vector_unique_genes_pathway_WT<-sort(vector_unique_genes_pathway_WT[which(!is.na
 # Creating dummies for each gene column 
 pathway_genes_one_hot_encoded_WT <- dummy_cols(pathway_genes_wider_WT, select_columns = gene_cols_WT, remove_selected_columns = TRUE)
 
-
+library(tibble)
 ##Setting rownames 
-rownames(pathway_genes_one_hot_encoded_WT) <- pathway_genes_one_hot_encoded_WT$Description
-description <-pathway_genes_one_hot_encoded_WT$Description 
+pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT %>%
+                                    mutate(Description_copy = Description) %>% 
+                                    column_to_rownames(var = "Description_copy")
 
 # Remove NA cols after encoding 
 pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT[ ,  -(grep("geneID\\d+_NA$",names(pathway_genes_one_hot_encoded_WT)))]
@@ -941,17 +924,14 @@ names(pathway_genes_one_hot_encoded_WT)[12:last_col] <- pathway_genes_one_hot_en
 # Dropping non gene cols 
 genes_only_pathway_onehot_encoded <-pathway_genes_one_hot_encoded_WT[12: last_col]
 
-#Keeping rownames
-
-
 #Gene info only 
 non_gene_data <-pathway_genes_one_hot_encoded_WT[1:11]
 
 # Order colnames in alphabetical order
 genes_only_pathway_onehot_encoded <-genes_only_pathway_onehot_encoded[order(colnames(genes_only_pathway_onehot_encoded))]
 
-all.equal(rownames(genes_only_pathway_onehot_encoded),non_gene_data)
 ## Index check!!!!
+all.equal(rownames(genes_only_pathway_onehot_encoded),rownames(non_gene_data))
 all.equal(rownames(pathway_genes_one_hot_encoded_WT), rownames(non_gene_data))
 
 # Consolidate duplicated cols 
@@ -959,8 +939,9 @@ index_list_TRUE <- list() # To store all the indices that have val ==1
 True_at_i<-c() # To store the indices per consolidated col that have val==1
 target <-1
 last_col_df<- ncol(genes_only_pathway_onehot_encoded)
-unique_names <- unique(names(genes_only_pathway_onehot_encoded))
-length_unique_names <- length(unique_names) # To keep track of how many cols I retrieve 
+unique_names_check <- vector_unique_genes_pathway_WT
+length_unique_names <- length(unique_names_check) # To keep track of how many cols I retrieve 
+unique_names <- list()
 k=1 #Counter for unique cols
 for(i in 1:last_col_df){
   
@@ -983,35 +964,36 @@ for(i in 1:last_col_df){
    if(boolean_index==FALSE){
      if(k !=length_unique_names){
       index_list_TRUE[[k]]<-True_at_i # Add first
-      unique_names[[k]]<-unique_names[k] # Keeping track of the unique colname order
+      unique_names[[k]]<-unique_names_check[k] # Keeping track of the unique colname order
       True_at_i <-c() # Restart vector per col
       True_at_i <-c(True_at_i, which(genes_only_pathway_onehot_encoded[ , index_at_i]== target)) # Evaluate then add 
-      k=k+1 # Add to the index in uniqe colnames
+      k=k+1 # Add to the index in unique colnames
      }
      if(k ==length_unique_names){ # if last unique col add
        index_list_TRUE[[k]]<- True_at_i
-       unique_names[[k]]<-unique_names[k] # Keeping track of the unique colname order
+       unique_names[[k]]<-unique_names_check[k] # Keeping track of the unique colname order
      }
    }
  }
 }
 
+# Retrieve results
+unique_names<-unlist(unique_names)
 # Check lengths of unique names found by the unique function and the iterative function
 stopifnot(length(index_list_TRUE)==length_unique_names & (length_unique_names== length(unique_names)))
 
 # Checking for order of names of unique cols that were merged 
 stopifnot(all.equal(unique_names, vector_unique_genes_pathway_WT))
-length(unique(unique_names))
-length(unique(vector_unique_genes_pathway_WT))
+
 setdiff(unique_names,vector_unique_genes_pathway_WT)
 
 # Checking for proper consolidation 
 target<- 1
 cbinded_vectors<- c()
-vector<- rep(0,157)
+num_rows <- nrow(pathway_genes_one_hot_encoded_WT)
+vector<- rep(0,num_rows)
 
 for(i in seq_along(1:length(index_list_TRUE))){
-  vector<- rep(0,157)
   current_cols_index_TRUE<-unlist(index_list_TRUE[i]) # Retrieve the indices that are TRUE for each gene
   vector[current_cols_index_TRUE]<- target # Adding the the target to the indices for each col
   cbinded_vectors<-cbind(cbinded_vectors,vector) # bind all the cols together 
@@ -1032,32 +1014,130 @@ results<-lapply(random_nums_to_test_merge,function(x) test_merge(x)) # Retrieve 
 stopifnot(length(which(results==FALSE))==0) # Stop if any tests came out not equal/FALSE 
 
 # Index check 
-all.equal(non_gene_data$Description, description)
+all.equal(non_gene_data$Description, pathway_genes_one_hot_encoded_WT$Description)
 
 # Merge df with pathway info
 WT_cleaned_pathway_genes_df<-data.frame(non_gene_data, df_not_dup_cols)
 
 # Making sure all the genes are present
-setdiff( unique(markers_pathway_WT$Genes) , cluster_1$SYMBOL)
+setdiff( unique_names , cluster_1$SYMBOL)
 setdiff(unique(all_markers_df_cluster_WT_limma_stats$Genes), cluster_1$SYMBOL)
 
+#Renaming for joining 
+all_results[ "Genes"]<- rownames(all_results)
+names(count_data)[1]<- "Genes"
+
+# Aggregating pathway,marker, limma stats, count data 
 markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
   pivot_longer(
-    cols= c(12:340),
+    cols= c(12:363),
     names_to= "Genes",
     values_to= "value") %>%
     filter(value ==1) %>%
     full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
-    left_join(all_results, by= "Genes")
-    
-all_results[ "Genes"]<- rownames(all_results)
+    left_join(all_results[ , -(8)], by= "Genes") %>%
+    left_join(count_data[ , 1:7], by = "Genes") 
+  
+# Quick look at the available pathways for WT   
+unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
 
-cytoplasmic_translation_genes<-markers_pathway_WT %>%
-                              filter(Description == "cytoplasmic translation")
+# Retrieve the pathways of interest
+pathways_of_interest<- c()
+search_order<-c("hypoxia", "protein", "deubiquitination","apopt", "membrane fusion", "phagy")
+for(term in search_order){
+  current_search<-grep(term, markers_pathway_WT$Description, value=TRUE)
+  pathways_of_interest<-c(pathways_of_interest, current_search)
+}
 
+# Retrieving the mean expr of WT cells 
+markers_pathway_WT<-markers_pathway_WT %>%
+                        mutate(
+                        WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
 
+# Subset and order selected pathways 
+markers_selected_pathways_WT<-subset(markers_pathway_WT, Description %in% pathways_of_interest)
+markers_selected_pathways_WT <- markers_selected_pathways_WT %>% 
+  mutate(Description = factor(Description, levels = unique(pathways_of_interest)))
 
-# Pivot longer and add all_markers_df_cluster_WT_limma_stats data 
+# Plotting Pathway and gene info colored by avg exp in WT 
+n_genes <- length(unique(markers_selected_pathways_WT$Genes))
+n_pathways <- length(unique(markers_selected_pathways_WT$Description))
+
+px_per_gene <- 90
+px_per_pathway <- 40
+res_val <- 300
+
+plot_width  <- max(8000, n_genes * px_per_gene)
+plot_height <- max(6000, n_pathways * px_per_pathway)
+
+png("plots/pathway_genes.png", width = plot_width, height = plot_height, res = res_val)
+
+ggplot(markers_selected_pathways_WT, aes(Genes, Description, fill = WT_mean)) + 
+  geom_tile(aes(width = 0.9, height = 0.9)) + 
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Genes", y = "Pathway", fill = "WT_mean", 
+       title="Avg WT expression of each gene in apoptosis and pyroptosis related pathways")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+# Gene and markers 
+## Plotting Pathway and gene info colored by avg exp in WT 
+n_genes <- length(unique(markers_selected_pathways_WT$Genes))
+n_markers<- length(unique(markers_selected_pathways_WT$Marker))
+
+px_per_gene <- 90
+px_per_markers <- 40
+res_val <- 100
+
+plot_width  <- max(8000, n_genes * px_per_gene)
+plot_height <- max(4000, n_markers * px_per_markers)
+
+png("plots/marker_genes.png", width = plot_width, height = plot_height, res = res_val)
+
+ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = WT_mean)) + 
+  geom_tile(aes(width = 0.9, height = 0.9)) + 
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Genes", y = "Marker", fill = "WT_mean", 
+       title="Avg WT expression of each gene in apoptosis and pyroptosis related markers")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+markers_genes_expr_WT <-markers_selected_pathways_WT %>%
+  select(2,12,15,29) %>%
+  pivot_longer(
+    cols=c(3),
+    values_to= "Markers"
+  ) %>%
+  select(c(1,2,3,5))
+ 
+ markers_genes_expr_WT %>%
+  group_split(Description) %>% 
+  map(~ {
+    png("paste0(seq_along(unique(markers_genes_expr_WT$Description)),'/test.png'", width = 3000, height = 2000, res = 100)
+    ggplot(.x, aes(x = Genes, y = Markers, fill =WT_mean)) +
+      geom_tile(aes(width = 0.9, height = 0.9)) 
+    dev.off()
+  })
 
 
 
