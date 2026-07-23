@@ -1027,6 +1027,8 @@ setdiff(unique(all_markers_df_cluster_WT_limma_stats$Genes), cluster_1$SYMBOL)
 all_results[ "Genes"]<- rownames(all_results)
 names(count_data)[1]<- "Genes"
 
+### Not able to see deubiquination pathway !!!!!!!!!!!!!!!!########
+
 # Aggregating pathway,marker, limma stats, count data 
 markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
   pivot_longer(
@@ -1037,7 +1039,7 @@ markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
     full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
     left_join(all_results[ , -(8)], by= "Genes") %>%
     left_join(count_data[ , 1:7], by = "Genes") 
-  
+
 # Quick look at the available pathways for WT   
 unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
 
@@ -1123,24 +1125,34 @@ ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = WT_mean)) +
 dev.off()
 
 markers_genes_expr_WT <-markers_selected_pathways_WT %>%
-  select(2,12,15,29) %>%
+  select(2,12,14,15,29) %>%
   pivot_longer(
     cols=c(3),
     values_to= "Markers"
   ) %>%
-  select(c(1,2,3,5))
+  select(c(1,2,3,4,6))
  
- markers_genes_expr_WT %>%
-  group_split(Description) %>% 
-  map(~ {
-    png("paste0(seq_along(unique(markers_genes_expr_WT$Description)),'/test.png'", width = 3000, height = 2000, res = 100)
-    ggplot(.x, aes(x = Genes, y = Markers, fill =WT_mean)) +
-      geom_tile(aes(width = 0.9, height = 0.9)) 
-    dev.off()
-  })
+markers_genes_expr_WT_split<- markers_genes_expr_WT %>%
+  group_split(Description, Markers_cleaned) %>%
+  bind_rows() %>%
+  as.data.frame() %>%
+  mutate(General_pathway = case_when(
+    str_detect(Description, "(?i)hypoxia") ~ "hypoxia",
+    str_detect(Description, "(?i)protein") ~ "protein remodeling",
+    str_detect(Description, "(?i)deubiquitination") ~ "deubiquitination",
+    str_detect(Description, "(?i)apopt") ~ "apoptosis",
+    str_detect(Description, "(?i)fusion") ~ "membrane fusion",
+    str_detect(Description, "(?i)phagy") ~ "paghy"))
 
 
+png("plots/genes_markers_general_pathway.png", width = 3000, height = 2000, res = res_val)
+ggplot(markers_genes_expr_WT_split, aes(x = Genes, y = Markers_cleaned, fill = WT_mean)) +
+    geom_tile(aes(width = 0.9, height = 0.9))+
+    facet_wrap(~General_pathway)
+dev.off()
 
+length(unique(markers_genes_expr_WT_split$Description))
+lapply(markers_genes_expr_WT_split, function(x) plotting_by_description(x))
 ## Add cyber scores 
 # Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
