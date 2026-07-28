@@ -906,7 +906,6 @@ pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT %>%
 pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT[ ,  -(grep("geneID\\d+_NA$",names(pathway_genes_one_hot_encoded_WT)))]
 
 
-
 ## Write an assertion test just to check for correct one hot encoding 
 #test_1<- pathway_genes_one_hot_encoded[ "purine ribonucleotide metabolic process",c(1:11,which(pathway_genes_one_hot_encoded["purine ribonucleotide metabolic process", ]== 1)) ]
 #test-2 <- pathway_genes_one_hot_encoded[]
@@ -921,116 +920,42 @@ pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT[ ,  -(grep(
 pathway_genes_one_hot_encoded_cols_only_WT<- gsub("[geneID0-9]*_([A-Za-z0-9]+)", "\\1",names(pathway_genes_one_hot_encoded_WT)[12:ncol(pathway_genes_one_hot_encoded_WT)])
 last_col<-dim(pathway_genes_one_hot_encoded_WT)[2]
 names(pathway_genes_one_hot_encoded_WT)[12:last_col] <- pathway_genes_one_hot_encoded_cols_only_WT
-# Dropping non gene cols 
+
+# Keeping gene cols only
 genes_only_pathway_onehot_encoded <-pathway_genes_one_hot_encoded_WT[12: last_col]
 
 #Gene info only 
 non_gene_data <-pathway_genes_one_hot_encoded_WT[1:11]
 
-# Order colnames in alphabetical order
-genes_only_pathway_onehot_encoded <-genes_only_pathway_onehot_encoded[order(colnames(genes_only_pathway_onehot_encoded))]
+#Checking for row oder 
+stopifnot(all.equal(rownames(genes_only_pathway_onehot_encoded), rownames(non_gene_data)))
 
-## Index check!!!!
-all.equal(rownames(genes_only_pathway_onehot_encoded),rownames(non_gene_data))
-all.equal(rownames(pathway_genes_one_hot_encoded_WT), rownames(non_gene_data))
+# Combining duplicated cols from dummy one hot encoding 
+all_names <- names(genes_only_pathway_onehot_encoded)
 
-# Consolidate duplicated cols 
-index_list_TRUE <- list() # To store all the indices that have val ==1
-True_at_i<-c() # To store the indices per consolidated col that have val==1
-target <-1
-last_col_df<- ncol(genes_only_pathway_onehot_encoded)
-unique_names_check <- vector_unique_genes_pathway_WT
-length_unique_names <- length(unique_names_check) # To keep track of how many cols I retrieve 
-unique_names <- list()
-k=1 #Counter for unique cols
-for(i in 1:last_col_df){
-  
- if(i==1){
-   index<- which(genes_only_pathway_onehot_encoded[ , i]== 1) 
-   True_at_i <- c(True_at_i,index) # Adds col 1 to the per unique col vector 
- }
+# Removing the duplicate identifiers 
+true_gene_names <- str_remove(all_names, "\\.\\d+$")
 
- if(i!=1){
-   index_at_i<-i
-   index_at_i_minus <-(index_at_i-1)
-   # Evaluates consecutive colnames
-   boolean_index<-(names(genes_only_pathway_onehot_encoded)[index_at_i]==names(genes_only_pathway_onehot_encoded)[index_at_i_minus])
-   
-   # If consecutive names are the same add to per unique col vector
-   if( boolean_index==TRUE){
-     True_at_i <-c(True_at_i, which(genes_only_pathway_onehot_encoded[ , index_at_i]== target))
-   }
-   # If consecutive names are not the same add to list of unique cols with index at which val ==1 
-   if(boolean_index==FALSE){
-     if(k !=length_unique_names){
-      index_list_TRUE[[k]]<-True_at_i # Add first
-      unique_names[[k]]<-unique_names_check[k] # Keeping track of the unique colname order
-      True_at_i <-c() # Restart vector per col
-      True_at_i <-c(True_at_i, which(genes_only_pathway_onehot_encoded[ , index_at_i]== target)) # Evaluate then add 
-      k=k+1 # Add to the index in unique colnames
-     }
-     if(k ==length_unique_names){ # if last unique col add
-       index_list_TRUE[[k]]<- True_at_i
-       unique_names[[k]]<-unique_names_check[k] # Keeping track of the unique colname order
-     }
-   }
- }
-}
+# Getting the list of unique gene names 
+unique_genes <- unique(true_gene_names)
 
-# Retrieve results
-unique_names<-unlist(unique_names)
-# Check lengths of unique names found by the unique function and the iterative function
-stopifnot(length(index_list_TRUE)==length_unique_names & (length_unique_names== length(unique_names)))
+# Combining duplicated cols
+collapsed <- map_dfc(unique_genes, function(g) {
+  cols_for_gene <- genes_only_pathway_onehot_encoded[, true_gene_names == g, drop = FALSE]
+  tibble(!!g := as.integer(rowSums(cols_for_gene) > 0))
+})
 
-# Checking for order of names of unique cols that were merged 
-stopifnot(all.equal(unique_names, vector_unique_genes_pathway_WT))
+pathway_genes_one_hot_encoded_WT_collapsed <- bind_cols(non_gene_data, collapsed)
 
-setdiff(unique_names,vector_unique_genes_pathway_WT)
-
-# Checking for proper consolidation 
-target<- 1
-cbinded_vectors<- c()
-num_rows <- nrow(pathway_genes_one_hot_encoded_WT)
-vector<- rep(0,num_rows)
-
-for(i in seq_along(1:length(index_list_TRUE))){
-  current_cols_index_TRUE<-unlist(index_list_TRUE[i]) # Retrieve the indices that are TRUE for each gene
-  vector[current_cols_index_TRUE]<- target # Adding the the target to the indices for each col
-  cbinded_vectors<-cbind(cbinded_vectors,vector) # bind all the cols together 
-}
-df_not_dup_cols<-data.frame(cbinded_vectors) # Convert to df 
-if(dim(df_not_dup_cols)[2]== length(unique_names)){ # Check for the correct # of cols 
-names(df_not_dup_cols)<-unique_names}
-
-# Creating random 20 random numbers from 1 to 329 for each column. 
-random_nums_to_test_merge<-sample(ncol(df_not_dup_cols), size = 20, replace = FALSE) # Random sampling to check for proper consolidation 
-test_merge<-function(ran){
-all.equal(sort(which(df_not_dup_cols[ ,ran]==1)),sort(unlist(index_list_TRUE[ran])))
-}
-
-results<-lapply(random_nums_to_test_merge,function(x) test_merge(x)) # Retrieve results of the consolidation test 
+# Assigning NA == 0
+pathway_genes_one_hot_encoded_WT_collapsed[is.na(pathway_genes_one_hot_encoded_WT_collapsed)] <-0
 
 
-stopifnot(length(which(results==FALSE))==0) # Stop if any tests came out not equal/FALSE 
-
-# Index check 
-all.equal(non_gene_data$Description, pathway_genes_one_hot_encoded_WT$Description)
-
-# Merge df with pathway info
-WT_cleaned_pathway_genes_df<-data.frame(non_gene_data, df_not_dup_cols)
-
-# Making sure all the genes are present
-setdiff( unique_names , cluster_1$SYMBOL)
-setdiff(unique(all_markers_df_cluster_WT_limma_stats$Genes), cluster_1$SYMBOL)
-
-#Renaming for joining 
-all_results[ "Genes"]<- rownames(all_results)
-names(count_data)[1]<- "Genes"
-
-### Not able to see deubiquination pathway !!!!!!!!!!!!!!!!########
+all_results<- add_column(all_results, Genes = rownames(all_results), .before = 1)
+names(count_data)[1]<-"Genes"
 
 # Aggregating pathway,marker, limma stats, count data 
-markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
+markers_pathway_WT <- pathway_genes_one_hot_encoded_WT_collapsed %>%
   pivot_longer(
     cols= c(12:363),
     names_to= "Genes",
@@ -1038,7 +963,10 @@ markers_pathway_WT <- WT_cleaned_pathway_genes_df %>%
     filter(value ==1) %>%
     full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
     left_join(all_results[ , -(8)], by= "Genes") %>%
-    left_join(count_data[ , 1:7], by = "Genes") 
+    left_join(count_data[ , 1:7], by = "Genes") %>%
+    mutate(
+    WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
+
 
 # Quick look at the available pathways for WT   
 unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
@@ -1050,11 +978,6 @@ for(term in search_order){
   current_search<-grep(term, markers_pathway_WT$Description, value=TRUE)
   pathways_of_interest<-c(pathways_of_interest, current_search)
 }
-
-# Retrieving the mean expr of WT cells 
-markers_pathway_WT<-markers_pathway_WT %>%
-                        mutate(
-                        WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
 
 # Subset and order selected pathways 
 markers_selected_pathways_WT<-subset(markers_pathway_WT, Description %in% pathways_of_interest)
@@ -1150,6 +1073,8 @@ ggplot(markers_genes_expr_WT_split, aes(x = Genes, y = Markers_cleaned, fill = W
     geom_tile(aes(width = 0.9, height = 0.9))+
     facet_wrap(~General_pathway)
 dev.off()
+
+png("plots/hypoxia_pathway.png", width = 3000, height = 2000, res = res_val)
 
 length(unique(markers_genes_expr_WT_split$Description))
 lapply(markers_genes_expr_WT_split, function(x) plotting_by_description(x))
