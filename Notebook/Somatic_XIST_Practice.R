@@ -89,6 +89,7 @@ library(tidyr)
 library(broom)
 library(stringr)
 library(fastDummies)
+library(tibble)
 
 # Increasing timeout cutoff 
 options(timeout = 1200)
@@ -896,7 +897,6 @@ vector_unique_genes_pathway_WT<-sort(vector_unique_genes_pathway_WT[which(!is.na
 # Creating dummies for each gene column 
 pathway_genes_one_hot_encoded_WT <- dummy_cols(pathway_genes_wider_WT, select_columns = gene_cols_WT, remove_selected_columns = TRUE)
 
-library(tibble)
 ##Setting rownames 
 pathway_genes_one_hot_encoded_WT <- pathway_genes_one_hot_encoded_WT %>%
                                     mutate(Description_copy = Description) %>% 
@@ -966,7 +966,6 @@ markers_pathway_WT <- pathway_genes_one_hot_encoded_WT_collapsed %>%
     left_join(count_data[ , 1:7], by = "Genes") %>%
     mutate(
     WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
-
 
 # Quick look at the available pathways for WT   
 unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
@@ -1048,49 +1047,147 @@ ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = WT_mean)) +
 dev.off()
 
 markers_genes_expr_WT <-markers_selected_pathways_WT %>%
-  select(2,12,14,15,29) %>%
+  select(2,12,14,15,16) %>%
   pivot_longer(
     cols=c(3),
     values_to= "Markers"
   ) %>%
   select(c(1,2,3,4,6))
- 
-markers_genes_expr_WT_split<- markers_genes_expr_WT %>%
-  group_split(Description, Markers_cleaned) %>%
-  bind_rows() %>%
-  as.data.frame() %>%
+
+markers_genes_general_pathway<- markers_genes_expr_WT %>%
   mutate(General_pathway = case_when(
     str_detect(Description, "(?i)hypoxia") ~ "hypoxia",
     str_detect(Description, "(?i)protein") ~ "protein remodeling",
-    str_detect(Description, "(?i)deubiquitination") ~ "deubiquitination",
     str_detect(Description, "(?i)apopt") ~ "apoptosis",
     str_detect(Description, "(?i)fusion") ~ "membrane fusion",
-    str_detect(Description, "(?i)phagy") ~ "paghy"))
+    str_detect(Description, "(?i)phagy") ~ "paghy")) 
 
+# Splitting by general pathwya description 
+markers_genes_expr_WT_split<-markers_genes_general_pathway %>%
+  group_split(General_pathway)
 
-png("plots/genes_markers_general_pathway.png", width = 3000, height = 2000, res = res_val)
-ggplot(markers_genes_expr_WT_split, aes(x = Genes, y = Markers_cleaned, fill = WT_mean)) +
-    geom_tile(aes(width = 0.9, height = 0.9))+
-    facet_wrap(~General_pathway)
+#Retrieving pathway splits 
+pathways <- c("apoptosis", "hypoxia", "membrane_fusion", "phagy", "protein_remodeling")
+
+splitting <- function(x, pathway) {
+   current_df <- data.frame(x)
+    assign(paste0(pathway, "_pathway_df"), x, envir = .GlobalEnv)
+}
+
+for(i in seq_along(pathways)){
+  splitting(markers_genes_expr_WT_split[[i]], pathways[i])
+}
+  
+#### Recluster!!!!
+png("plots/hypoxia_pathway_marker.png", width = 8000, height = 5000, res = 100)
+ggplot(hypoxia_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9))+
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Hypoxia colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
 dev.off()
 
-png("plots/hypoxia_pathway.png", width = 3000, height = 2000, res = res_val)
+png("plots/apoptosis_pathway_marker.png", width = 8000, height = 5000, res = 100)
+ggplot(apoptosis_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9)) +
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Apoptosis colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
 
-length(unique(markers_genes_expr_WT_split$Description))
-lapply(markers_genes_expr_WT_split, function(x) plotting_by_description(x))
-## Add cyber scores 
-# Any sig in the immune scores? look at those markers and find the genes, descriptions and pathways, disease
+dev.off()
+
+png("plots/membrane_fusion_pathway_marker.png", width = 8000, height = 5000, res = 100)
+ggplot(membrane_fusion_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9)) +
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Membrane Fusion colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+png("plots/phagy_pathway_marker.png", width = 8000, height = 5000, res = 100)
+ggplot(phagy_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9)) +
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Phagy colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+png("plots/protein_remodeling_pathway_marker.png", width = 8000, height = 5000, res = 100)
+ggplot(protein_remodeling_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9)) +
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Protein Remodeling colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+save.image("Somatic_XIST_Practice.RData")
+
+## Make sense of markers in selected pathways
+## How are hormones affecting immune cells?
+# Clean and extract genes that contribute to disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
-# Add anything to search terms? lipoprotein 
-# Look which sig immune genes are in the same TAD 
-# Map by coordinate 
+# Look which sig immune genes are in the same TAD, same TAD activation of sig genes
+# Map by these sig genes and their TAD by coordinate 
 # Description for each biomarker found to be sig 
-# Look at info on reactive species, lactate pathways?
+# Confirmed info y known pathways
 # APOE? lipids APOC1??
-# Look at hormone marker? 
 # Look at react to me 
 # Co-expression network
 # Cytokines 
-# Back everything up
-# reproduce for KD cluster!!! def and 
+
+
 
