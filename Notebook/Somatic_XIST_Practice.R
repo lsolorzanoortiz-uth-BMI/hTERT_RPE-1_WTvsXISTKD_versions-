@@ -28,7 +28,8 @@ install.packages(c(
   "broom",            # Stats to tidy output
   "tidyr",            # Data wrangling 
   "stringr",          # String manipulation
-  "fastDummies"      # One hot encoding/Dummy variables 
+  "fastDummies",    # One hot encoding/Dummy variables 
+  "ggh4x"
 ))
 
 # Install Bioconductor packages #####
@@ -90,7 +91,8 @@ library(broom)
 library(stringr)
 library(fastDummies)
 library(tibble)
-
+library(ggh4x)
+install.packages()
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
@@ -972,7 +974,9 @@ unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
 
 # Retrieve the pathways of interest
 pathways_of_interest<- c()
-search_order<-c("hypoxia", "protein", "deubiquitination","apopt", "membrane fusion", "phagy")
+search_order<-c("hypoxia", "protein", "deubiquitination","apopt", "membrane fusion",
+                "phagy", "hormone", "steroid", "estradiol", "insulin", "oxygen")
+
 for(term in search_order){
   current_search<-grep(term, markers_pathway_WT$Description, value=TRUE)
   pathways_of_interest<-c(pathways_of_interest, current_search)
@@ -1028,7 +1032,7 @@ plot_height <- max(4000, n_markers * px_per_markers)
 
 png("plots/marker_genes.png", width = plot_width, height = plot_height, res = res_val)
 
-ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = WT_mean)) + 
+ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = logFC)) + 
   geom_tile(aes(width = 0.9, height = 0.9)) + 
   scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
   theme_minimal(base_size = 14) +
@@ -1040,7 +1044,7 @@ ggplot(markers_selected_pathways_WT, aes(Marker, Genes, fill = WT_mean)) +
     legend.text = element_text(size = 10),
     panel.grid = element_blank()
   ) +
-  labs(x = "Genes", y = "Marker", fill = "WT_mean", 
+  labs(x = "Genes", y = "Marker", fill = "logFC", 
        title="Avg WT expression of each gene in apoptosis and pyroptosis related markers")+
   theme(plot.title = element_text(hjust = 0.5, size = 18))
 
@@ -1056,18 +1060,33 @@ markers_genes_expr_WT <-markers_selected_pathways_WT %>%
 
 markers_genes_general_pathway<- markers_genes_expr_WT %>%
   mutate(General_pathway = case_when(
-    str_detect(Description, "(?i)hypoxia") ~ "hypoxia",
-    str_detect(Description, "(?i)protein") ~ "protein remodeling",
+    str_detect(Description, "(?i)hypoxia") ~ "oxygen_regulation",
+    str_detect(Description, "(?i)protein") ~ "protein_remodeling",
     str_detect(Description, "(?i)apopt") ~ "apoptosis",
-    str_detect(Description, "(?i)fusion") ~ "membrane fusion",
-    str_detect(Description, "(?i)phagy") ~ "paghy")) 
+    str_detect(Description, "(?i)fusion") ~ "membrane_fusion",
+    str_detect(Description, "(?i)phagy") ~ "phagy",
+    str_detect(Description, "(?i)hormone") ~ "endocrine_regulation",
+    str_detect(Description, "(?i)steroid") ~ "endocrine_regulation",
+    str_detect(Description, "(?i)estradiol") ~ "endocrine_regulation",
+    str_detect(Description, "(?i)insulin") ~ "endocrine_regulation",
+    str_detect(Description, "(?i)oxygen") ~ "oxygen_regulation"), 
+    General_cell_type = case_when(
+    str_detect(Markers_cleaned, "(?i)T_cell|Tcell|CD4|CD8|Treg|reg|Regulatory|Killer|Helper|TH") ~ "T-cell",
+    str_detect(Markers_cleaned, "(?i)B_cell|bcell|Plasma|B_cell") ~ "B-cell",
+    str_detect(Markers_cleaned, "(?i)TAM|Macrophage|M|Monocyte") ~ "Macrophage",
+    str_detect(Markers_cleaned, "(?i)Dendritic|DC") ~ "Dendritic",
+    str_detect(Markers_cleaned, "(?i)phil|Mast|NK") ~ "weakly phagocytic",
+    str_detect(Markers_cleaned, "(?i)Myeloid|BALF") ~ "Myeloid",
+    str_detect(Markers_cleaned, "(?i)Anergy|Glycolysis") ~ "Energy"))
+    
+
 
 # Splitting by general pathwya description 
 markers_genes_expr_WT_split<-markers_genes_general_pathway %>%
+  mutate(General_pathway= factor(General_pathway, levels= unique(markers_genes_general_pathway$General_pathway))) %>%
   group_split(General_pathway)
-
 #Retrieving pathway splits 
-pathways <- c("apoptosis", "hypoxia", "membrane_fusion", "phagy", "protein_remodeling")
+pathways<- unique(markers_genes_general_pathway$General_pathway)
 
 splitting <- function(x, pathway) {
    current_df <- data.frame(x)
@@ -1079,12 +1098,17 @@ for(i in seq_along(pathways)){
 }
   
 #### Recluster!!!!
-png("plots/hypoxia_pathway_marker.png", width = 8000, height = 5000, res = 100)
-ggplot(hypoxia_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+
+dev.off()
+
+png("plots/oxygen_regulation_pathway_marker.png", width = 15000, height = 17000, res = 300)
+ggplot(oxygen_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9))+
+  facet_wrap(~General_cell_type, scales = "free")+
+  force_panelsizes(rows = c(2, 8, 2), cols = c(1, 1, 1))+
   scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
   theme_minimal(base_size = 14) +
-theme(
+  theme(
     axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
     axis.text.y = element_text(size = 16),
     axis.title = element_text(size = 14, face = "bold"),
@@ -1098,9 +1122,13 @@ theme(
 
 dev.off()
 
+
+
 png("plots/apoptosis_pathway_marker.png", width = 8000, height = 5000, res = 100)
-ggplot(apoptosis_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+ggplot(apoptosis_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
+  facet_wrap(~General_cell_type, scales = "free")+
+  force_panelsizes(rows = c(2, 8, 2), cols = c(1, 1, 1))+
   scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
   theme_minimal(base_size = 14) +
   theme(
@@ -1170,6 +1198,25 @@ ggplot(protein_remodeling_pathway_df, aes(x = Markers_cleaned, y = Genes, fill =
   ) +
   labs(x = "Markers", y = "Genes", fill = "logFC", 
        title="Markers vs Genes in Protein Remodeling colored by Log Fc WT vs XIST KD")+
+  theme(plot.title = element_text(hjust = 0.5, size = 18))
+
+dev.off()
+
+png("plots/endocrine_regulation.png", width = 8000, height = 5000, res = 100)
+ggplot(endocrine_regulation_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
+  geom_tile(aes(width = 0.9, height = 0.9)) +
+  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 16),
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Markers", y = "Genes", fill = "logFC", 
+       title="Markers vs Genes in Endocrine Regulation colored by Log Fc WT vs XIST KD")+
   theme(plot.title = element_text(hjust = 0.5, size = 18))
 
 dev.off()
