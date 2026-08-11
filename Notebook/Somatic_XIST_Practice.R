@@ -1011,10 +1011,10 @@ markers_genes_general_pathway<- markers_genes_expr_WT %>%
     str_detect(Markers_cleaned, "(?i)T_cell|Tcell|CD4|CD8|Treg|reg|Regulatory|Killer|Helper|TH") ~ "T-cell",
     str_detect(Markers_cleaned, "(?i)B_cell|bcell|Plasma|B_cell") ~ "B-cell",
     str_detect(Markers_cleaned, "(?i)TAM|Macrophage|M|Monocyte") ~ "Macrophage",
-    str_detect(Markers_cleaned, "(?i)Dendritic|DC") ~ "Dendritic",
+    str_detect(Markers_cleaned, "(?i)Dendritic|DC") ~"Dendritic",
     str_detect(Markers_cleaned, "(?i)phil|Mast|NK") ~ "Weakly_phagocytic",
     str_detect(Markers_cleaned, "(?i)Myeloid|BALF") ~ "Myeloid",
-    str_detect(Markers_cleaned, "(?i)Anergy|Glycolysis") ~ "Energy")) 
+    str_detect(Markers_cleaned, "(?i)Anergy|Glycolysis") ~ "Energy"))
 
 # Gene and markers 
 ## Plotting Pathway and gene info colored by avg exp in WT 
@@ -1058,7 +1058,7 @@ cell_order<- c("Energy", "Dendritic",
 
 # Splitting by general pathway description
 markers_genes_expr_WT_split<-markers_genes_general_pathway %>%
-  mutate(General_pathway= factor(General_pathway, levels=combined_levels)) %>%
+  mutate(General_pathway= factor(General_pathway, levels=unique(markers_genes_general_pathway$General_pathway))) %>%
   arrange(General_pathway,General_cell_type ) %>%
   mutate(
     General_pathway = factor(General_pathway),
@@ -1221,4 +1221,10 @@ save.image("Somatic_XIST_Practice.RData")
 # Cytokines 
 
 
+install.packages("msigdbr")
 
+library(msigdbr)
+
+# Retrieve C7 collection for human
+c7_gene_sets <- msigdbr(species = "Homo sapiens", category = "C7", subcategory = "IMMUNESIGDB")
+c7_WT_markers<-subset(c7_gene_sets, gene_symbol %in% cluster_1$SYMBOL)
