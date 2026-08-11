@@ -430,6 +430,7 @@ gap_positions <- which(diff(cluster_annotation$Cluster) != 0)
 
 columns_to_exclude_in_matrix<- "WT_mean|KD_mean|cluster_annotation.Cluster"
 num_cols_to_exclude_matrix <-grep(columns_to_exclude_in_matrix, colnames(deg_scaled_ordered))
+
 # Create annotated heatmap with gaps between clusters #####
 png("plots/Heatmap_GSE305810_gapped.png", width = 800, height = 600, res = 100)
 pheatmap(
@@ -1219,7 +1220,7 @@ save.image("Somatic_XIST_Practice.RData")
 # Look at react to me 
 # Co-expression network
 # Cytokines 
-
+# Stats for marker count in each group 
 
 install.packages("msigdbr")
 
