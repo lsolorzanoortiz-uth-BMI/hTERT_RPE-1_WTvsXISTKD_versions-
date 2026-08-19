@@ -1,5 +1,5 @@
 # Set CRAN mirror to avoid prompts during installation #####
-options(repos = c(CRAN = "https://cloud.r-project.org"))
+options(repos = c(CRAN = "https://cloud.r-project.org"), pkgType = "binary")
 # Install WGCNA and dependencies from CRAN #####
 install.packages("WGCNA", dependencies = TRUE)
 
@@ -29,8 +29,10 @@ install.packages(c(
   "tidyr",            # Data wrangling 
   "stringr",          # String manipulation
   "fastDummies",    # One hot encoding/Dummy variables 
-  "ggh4x"
-))
+  "ggh4x",
+  "here",
+  "library"
+), force=TRUE)
 
 # Install Bioconductor packages #####
 BiocManager::install(c(
@@ -48,7 +50,7 @@ BiocManager::install(c(
   "ComplexHeatmap",   # To visualize clusters in count data 
   "ImmuneSigR",       # To get immune markers present in the sig results enriched in WT
   "omnideconv/immunedeconv" # To get immune scoring 
-))
+), force = TRUE)
 
 # Load required libraries #####
 library(WGCNA)
@@ -92,14 +94,18 @@ library(stringr)
 library(fastDummies)
 library(tibble)
 library(ggh4x)
+library(here)
+library(curl)
+
+here::here()
+
+#Getting access to all folders within directory 
+here("hTERT_RPE_1_WTvsXISTKD_versions", "Data", "GSE305810", "Notebook", "plots")
 
 # Increasing timeout cutoff 
 options(timeout = 1200)
 
-# Set working directory #####
-setwd("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_WTvsXISTKD_versions ")
-
-if(!dir.exists("/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/hTERT_RPE_1_WTvsXISTKD_versions /GSE305810")){
+if(!dir.exists(here("GSE305810","/GSE305810"))){
 # Loading Data #####
 getGEOSuppFiles("GSE305810")
 
@@ -109,23 +115,21 @@ getGEOSuppFiles("GSE305810")
 sample_info <- getGEO("GSE305810", GSEMatrix = TRUE)
 sample_info <- pData(sample_info[[1]])
   
-# List all files in the downloaded folder #####
-files <- list.files("GSE305810", full.names = TRUE)
-
 # Read the count data file (In RPKM) #####
-count_data <- read.delim(files[1])
+count_data <- read.table(here("GSE305810","GSE305810_all_samples_RPKM.txt.gz"), header = TRUE, sep = "\t")
 
 # Number of columns #####
 last_col <- ncol(count_data)
 
 # Filter rows where the sum of columns 5 through the end is > 0 #####
-count_data <- count_data[rowSums(count_data[, 5:last_col], na.rm = TRUE ) >0, ] 
+count_data<-count_data %>% 
+  filter(rowSums(across(5:11)) > 0)
 
 # Naming the rows #####                                                               
 rownames(count_data) <- count_data$Gene
 
 # Genes in count data#####
-write.table(count_data$Gene, "Data/count_data_genes.txt")
+write.table(here(count_data$Gene,"count_data_genes.txt"))
 
 # Cleaning sample info #####
 sample_info_cleaned <- data.frame(
@@ -183,7 +187,7 @@ all_results <- topTable(
   adjust.method = "BH"
 )
 #Saving the limma results 
-write.table(all_results, file="Data/all_results_limma_WT_vs_XISTKD.txt", sep ="/t")
+write.table(here("Data", all_results,"all_results_limma_WT_vs_XISTKD.txt"), sep ="/t")
 
 # Plotting the differential analysis results 
 all_results$status <- "Not significant"
@@ -193,7 +197,7 @@ all_results$status[all_results$adj.P.Val < 0.05 & all_results$logFC < 0] <- "Dow
 
 counts <- table(all_results$status)
 
-png("plots/DEG_counts_text.png",
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","DEG_counts_text.png"),
     width = 1200, height = 800, res = 150)
 
 # blank canvas with nicer limits
@@ -243,7 +247,7 @@ custom_chrom <- function(x){
 all_results['Chrom'] <- sapply(chrom_metadata, custom_chrom)
 
 # Plotting DEGS####
-png("plots/Differentially_Enhaced_Volcano_GSE305810.png", width = 1000, height =500, res =100 )
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","Differentially_Enhaced_Volcano_GSE305810.png"), width = 1000, height =500, res =100)
 EnhancedVolcano(
   all_results,
   x = 'logFC',
@@ -269,7 +273,7 @@ all_results <- all_results[order(all_results$Chrom == "X"),]
 keyvals.col <- sort(keyvals.col, decreasing= TRUE)
 
 # Plotting, chrom by color ####                                
-png("plots/Differentially_Enhaced_Volcano_Colored_by_Chrom_GSE305810.png", width = 1000, height =500, res =100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","Differentially_Enhaced_Volcano_Colored_by_Chrom_GSE305810.png"), width = 1000, height =500, res =100)
 p <-EnhancedVolcano(
   all_results,
   x = 'logFC',
@@ -298,7 +302,7 @@ all_results_x_chrom$status[
   all_results_x_chrom$adj.P.Val < 0.05 & all_results_x_chrom$logFC > 0
 ] <- "Upregulated (FDR + logFC)"
 
-# Downregulated (significant + negative logFC)
+# Downregulated(significant + negative logFC)
 all_results_x_chrom$status[
   all_results_x_chrom$adj.P.Val < 0.05 & all_results_x_chrom$logFC < 0
 ] <- "Downregulated (FDR + logFC)"
@@ -306,7 +310,7 @@ all_results_x_chrom$status[
 counts <- table(all_results_x_chrom$status)
 total_genes <- sum(counts)
 
-png("plots/DEG_counts_text_X_chom.png",
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","DEG_counts_text_X_chom.png"),
     width = 1200, height = 800, res = 150)
 plot(1, type = "n",
      xlim = c(0, 1), ylim = c(0, 1),
@@ -341,7 +345,7 @@ sig_results <- all_results[which(all_results$adj.P.Val<0.05), ]
 count_data_sig <- count_data[rownames(sig_results), ]
 
 # Saving sig count_data #####
-write.table(count_data_sig, "Data/count_data_sig.txt", sep ="\t")
+write.table(here("Data",count_data_sig, "count_data_sig.txt"), sep ="\t")
 
 # Matrix sig #####
 matrix_sig <- matrix[rownames(sig_results), ]
@@ -361,7 +365,7 @@ hc_samples <- hclust(as.dist(1-cor(matrix_sig_scaled ,
 sampleTree = as.dendrogram(hc_samples, method = average)
 
 # Plotting Samples #####
-png("plots/Sample_clustering_GSE305810.png", width = 800, height = 600, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","Sample_clustering_GSE305810.png"), width = 800, height = 600, res = 100)
 
 plot(sampleTree,
      main = "Sample Clustering in GSE305810 dataset ")
@@ -375,7 +379,7 @@ hc_genes <- hclust(as.dist(1-cor(t(matrix_sig_scaled) ,
 geneTree = as.dendrogram(hc_genes, method = average)
 
 # Plotting Samples #####
-png("plots/Gene_clustering_GSE305810.png", width = 800, height = 600, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ", "plots","Gene_clustering_GSE305810.png"), width = 800, height = 600, res = 100)
 
 plot(geneTree,
      main = "Gene Clustering in GSE305810 dataset ",
@@ -385,7 +389,7 @@ plot(geneTree,
 dev.off()
 
 # Heatmap #####
-png("plots/Heatmap_GSE305810.png", width = 800, height = 600, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "Heatmap_GSE305810.png"), width = 800, height = 600, res = 100)
 
 heatmap.2(as.matrix(matrix_sig),
           Rowv = as.dendrogram(hc_genes),
@@ -432,7 +436,7 @@ columns_to_exclude_in_matrix<- "WT_mean|KD_mean|cluster_annotation.Cluster"
 num_cols_to_exclude_matrix <-grep(columns_to_exclude_in_matrix, colnames(deg_scaled_ordered))
 
 # Create annotated heatmap with gaps between clusters #####
-png("plots/Heatmap_GSE305810_gapped.png", width = 800, height = 600, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","Heatmap_GSE305810_gapped.png"), width = 800, height = 600, res = 100)
 pheatmap(
   deg_scaled_ordered[,-num_cols_to_exclude_matrix],
   cluster_rows = FALSE,  
@@ -462,13 +466,13 @@ gene_entrez <- bitr(cluster_annotation$SYMBOL,
 row.names(gene_entrez) <- gene_entrez$SYMBOL
 
 # Saving entrez of clusters 
-write.table(gene_entrez, file="Data/All_Clusters_entrez.txt", sep="\t")
+write.table(here("Data","gene_entrez", "All_Clusters_entrez.txt"), sep="\t")
 
 #Getting the missing symbols #####
 missing_genes <- setdiff(cluster_annotation$SYMBOL, gene_entrez$SYMBOL)
 
 # Saving Symbols not mapped for documentation purposes #####
-write.table(missing_genes, "Data/Genes_not_mapped_to_ENTREZID.txt")
+write.table(here("Data", missing_genes, "Genes_not_mapped_to_ENTREZID.txt"))
 
 # subset for cluster 1 #####
 cluster_1 <- subset(cluster_annotation, Cluster == 1)
@@ -488,7 +492,7 @@ go_enrichment_cluster_1 <- enrichGO(
   readable = TRUE
 )
 
-png("plots/kegg_cluster1.png", width = 800, height = 600, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","kegg_cluster1.png"), width = 800, height = 600, res = 100)
 go_enrichment_kegg_cluster1 <- enrichKEGG(
   gene = gene_entrez_cluster_1$ENTREZID,
   organism = "hsa",
@@ -510,7 +514,7 @@ go_enrichment_cluster_2 <- enrichGO(
 count_data[,"SYMBOL"] <- count_data[,"Gene"]
 
 #GO Enrichment Barplot #####
-png("plots/GO_enrichment_barplot_cluster_1_GSE305810.png",
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "GO_enrichment_barplot_cluster_1_GSE305810.png"),
     width = 2000, height = 4000, res = 100)
 barplot(arrange(go_enrichment_cluster_1, qvalue), 
         showCategory = 100,
@@ -518,7 +522,7 @@ barplot(arrange(go_enrichment_cluster_1, qvalue),
 dev.off()
 
 
-png("plots/GO_enrichment_barplot_cluster_2_GSE305810.png",
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","GO_enrichment_barplot_cluster_2_GSE305810.png"),
     width = 2000, height = 4000, res = 100)
 barplot(arrange(go_enrichment_cluster_2, qvalue), 
         showCategory = 100,
@@ -557,7 +561,7 @@ gsea_do <- gseDO(
 sig_gsea <- filter(gsea_do, p.adjust < 0.05)
 
 # Plotting the gsea
-png("plots/gsea_do_enrichment.png", width = 2000,
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "gsea_do_enrichment.png"), width = 2000,
     height = 4000,res = 100)
 ridgeplot(sig_gsea, showCategory = 35, orderBy= "NES", fill= "p.adjust")+ 
   scale_fill_continuous(low="#FF0000CC", high="#3182bdCC") +
@@ -607,11 +611,11 @@ sig_genes_coordinates$strand<-lapply(sig_genes_coordinates$strand, formatting_st
 # Formatting 
 sig_genes_coordinates$strand<-as.character(sig_genes_coordinates$strand)
 # Saving coordinates of sig genes 
-write.table(sig_genes_coordinates, file="Data/sig_genes_coordinates.txt", sep="\t")
+write.table(here("hTERT_RPE_1_WTvsXISTKD_versions ", "Data", sig_genes_coordinates, file="sig_genes_coordinates.txt"), sep="\t")
 return(sig_genes_coordinates)
 },
 otherwise=(
-  sig_genes_coordinates<-read.table("Data/sig_genes_coordinates.txt")
+  sig_genes_coordinates<-read.table(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", "sig_genes_coordinates.txt"))
   ))
 
 # Df of unique genes #####                        
@@ -632,7 +636,7 @@ sig_genes_coordinates_unique$chromosome_name <- factor(
   levels = chromosome_order
 )
 # Plotting genes and coordinates #####
-png("plots/genes_coordinates.png", width = 4500, height = max(2000, 23 * 250), res = 300)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","genes_coordinates.png"), width = 4500, height = max(2000, 23 * 250), res = 300)
 ggplot(sig_genes_coordinates_unique, aes(xmin = start_position, xmax = end_position,
                                          y= chromosome_name)) +
   geom_gene_arrow() +
@@ -656,7 +660,7 @@ sig_genes_coordinates_unique_X_chrom <- filter(data.frame(sig_genes_coordinates_
 sig_genes_coordinates_unique_X_chrom[,'strand' ] <- as.character(sig_genes_coordinates_unique_X_chrom[,'strand' ])
 
 # Saving 
-write.table(sig_genes_coordinates_unique_X_chrom , file = "Data/sig_genes_coordinates_unique_X_chrom.txt",  col.names=TRUE, row.names= FALSE)
+write.table(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", sig_genes_coordinates_unique_X_chrom , file = "sig_genes_coordinates_unique_X_chrom.txt"),  col.names=TRUE, row.names= FALSE)
 
 
 # Subseting key genes 
@@ -675,7 +679,7 @@ gene_function1 <- getBM(
   values = rownames(sig_results),
   mart = mart
 )
-data.table::fwrite(gene_function1,"Data/gene_function1.txt.gz", sep="\t")
+data.table::fwrite(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", gene_function1,"gene_function1.txt.gz", sep="\t"))
 
 
 gene_function2 <- getBM(
@@ -684,10 +688,10 @@ gene_function2 <- getBM(
   values = rownames(sig_results),
   mart = mart
 )
-write.table(gene_function2, file="Data/gene_function2.txt", sep="\t")
+write.table(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", gene_function2, file="gene_function2.txt", sep="\t"))
 return(attributes_df, gene_function1, gene_function2)},
 otherwise=(
-  gene_function1 <- fread("Data/gene_function1.txt.gz", sep="\t")
+  gene_function1 <- fread(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data","gene_function1.txt.gz"), sep="\t")
   
 ))
 
@@ -1029,7 +1033,7 @@ res_val <- 100
 plot_width  <- max(8000, n_genes * px_per_gene)
 plot_height <- max(4000, n_markers * px_per_markers)
 
-png("plots/marker_genes.png", width = plot_width, height = plot_height, res = res_val)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","marker_genes.png"), width = plot_width, height = plot_height, res = res_val)
 
 ggplot(markers_genes_general_pathway, aes(Genes, Description,fill = logFC)) + 
   geom_tile(aes(width = 0.9, height = 0.9)) + 
@@ -1079,7 +1083,7 @@ for(i in seq_along(pathways)){
 }
 
 #### Re-cluster!!!!
-png("plots/oxygen_regulation_pathway_marker.png", width = 15000, height = 17000, res = 300)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","oxygen_regulation_pathway_marker.png"), width = 15000, height = 17000, res = 300)
 ggplot(oxygen_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9))+
   facet_wrap(~General_cell_type, scales = "free")+
@@ -1101,7 +1105,7 @@ ggplot(oxygen_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = 
 dev.off()
 
 
-png("plots/apoptosis_pathway_marker.png", width = 8000, height = 5000, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","apoptosis_pathway_marker.png"), width = 8000, height = 5000, res = 100)
 ggplot(apoptosis_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free")+
@@ -1122,7 +1126,7 @@ ggplot(apoptosis_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) 
 
 dev.off()
 
-png("plots/membrane_fusion_pathway_marker.png", width = 8000, height = 5000, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","membrane_fusion_pathway_marker.png"), width = 8000, height = 5000, res = 100)
 ggplot(membrane_fusion_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free")+                                       
@@ -1142,7 +1146,7 @@ ggplot(membrane_fusion_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = lo
 
 dev.off()
 
-png("plots/phagy_pathway_marker.png", width = 8000, height = 5000, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","phagy_pathway_marker.png"), width = 8000, height = 5000, res = 100)
 ggplot(phagy_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free", ncol=2)+
@@ -1163,7 +1167,7 @@ ggplot(phagy_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
 
 dev.off()
 
-png("plots/protein_remodeling_pathway_marker.png", width = 8000, height = 5000, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "protein_remodeling_pathway_marker.png"), width = 8000, height = 5000, res = 100)
 ggplot(protein_remodeling_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free", ncol=3)+
@@ -1184,7 +1188,7 @@ ggplot(protein_remodeling_pathway_df, aes(x = Genes, y = Markers_cleaned, fill =
 
 dev.off()
 
-png("plots/endocrine_regulation.png", width = 10000, height = 8000,res = 200)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","endocrine_regulation.png"), width = 10000, height = 8000,res = 200)
 ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free", ncol=3)+
@@ -1205,7 +1209,27 @@ ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill
 
 dev.off()
 
-save.image("Somatic_XIST_Practice.RData")
+all_gene_lists <- read_delim(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", "all_gene_lists.txt"), 
+                             delim = "\t", escape_double = FALSE, 
+                             trim_ws = TRUE)
+
+link_GO <- "https://s3.immport.org/release/genelists/current/"
+link_reactome <- "https://s3.immport.org/release/genelists/current/"
+
+
+all_gene_lists<-all_gene_lists %>%
+  mutate(
+    case_when(
+      str_detect(GO, "GO") ~map("GO:0002218", ~paste0(link_GO, .,".txt ")),
+      str_detect(GO, "Reactome") ~map("GO:0002218", ~paste0(link_reactome,.,".txt "))),
+      map("url", ~read.delim(url, header = TRUE, sep = "\t"))) %>%
+      map_dfr(~ tidy(.), .id = "variable") 
+
+
+names(all_gene_lists)[c(7,9)] <- c("link", "gene_list_explicit")
+
+# Retrieve each df from each row and concat the results then merge
+# with the master df markers_genes_general_pathway
 
 ## order each facet_wrap by cell type
 ## Make sense of markers in selected pathways
@@ -1222,10 +1246,3 @@ save.image("Somatic_XIST_Practice.RData")
 # Cytokines 
 # Stats for marker count in each group 
 
-install.packages("msigdbr")
-
-library(msigdbr)
-
-# Retrieve C7 collection for human
-c7_gene_sets <- msigdbr(species = "Homo sapiens", category = "C7", subcategory = "IMMUNESIGDB")
-c7_WT_markers<-subset(c7_gene_sets, gene_symbol %in% cluster_1$SYMBOL)
