@@ -97,10 +97,7 @@ library(ggh4x)
 library(here)
 library(curl)
 
-here::here()
-
-#Getting access to all folders within directory 
-here("hTERT_RPE_1_WTvsXISTKD_versions", "Data", "GSE305810", "Notebook", "plots")
+here::here("Desktop", "version_control", "hTERT_RPE_1_GSE305810","hTERT_RPE_1_WTvsXISTKD_versions", "Data", "GSE305810", "Notebook", "plots")
 
 # Increasing timeout cutoff 
 options(timeout = 1200)
@@ -522,7 +519,7 @@ barplot(arrange(go_enrichment_cluster_1, qvalue),
 dev.off()
 
 
-png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","GO_enrichment_barplot_cluster_2_GSE305810.png"),
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "GO_enrichment_barplot_cluster_1_GSE305810.png"),
     width = 2000, height = 4000, res = 100)
 barplot(arrange(go_enrichment_cluster_2, qvalue), 
         showCategory = 100,
@@ -561,7 +558,7 @@ gsea_do <- gseDO(
 sig_gsea <- filter(gsea_do, p.adjust < 0.05)
 
 # Plotting the gsea
-png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "gsea_do_enrichment.png"), width = 2000,
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "GO_enrichment_barplot_cluster_1_GSE305810.png"), width = 2000,
     height = 4000,res = 100)
 ridgeplot(sig_gsea, showCategory = 35, orderBy= "NES", fill= "p.adjust")+ 
   scale_fill_continuous(low="#FF0000CC", high="#3182bdCC") +
@@ -636,7 +633,7 @@ sig_genes_coordinates_unique$chromosome_name <- factor(
   levels = chromosome_order
 )
 # Plotting genes and coordinates #####
-png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots","genes_coordinates.png"), width = 4500, height = max(2000, 23 * 250), res = 300)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "GO_enrichment_barplot_cluster_1_GSE305810.png"), width = 4500, height = max(2000, 23 * 250), res = 300)
 ggplot(sig_genes_coordinates_unique, aes(xmin = start_position, xmax = end_position,
                                          y= chromosome_name)) +
   geom_gene_arrow() +
@@ -958,10 +955,53 @@ pathway_genes_one_hot_encoded_WT_collapsed <- bind_cols(non_gene_data, collapsed
 pathway_genes_one_hot_encoded_WT_collapsed[is.na(pathway_genes_one_hot_encoded_WT_collapsed)] <-0
 
 
+# Consolidating sources for robustness ############
+# Loading gene lists 
+all_gene_lists <- read_delim(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", "all_gene_lists.txt"), 
+                             delim = "\t", escape_double = FALSE, 
+                             trim_ws = TRUE)
+
+# Link body for immport gene lists
+link_GO <- "https://s3.immport.org/release/genelists/current/"
+link_reactome <- "https://s3.immport.org/release/genelists/current/"
+
+# Retrieve immport data 
+immport_genes_df <- all_gene_lists %>%
+  mutate(
+    url = case_when(
+      str_detect(GO, "GO")       ~ map("GO:0002218", ~ paste0(link_GO, ., ".txt")),
+      str_detect(GO, "Reactome") ~ map("GO:0002218", ~ paste0(link_reactome, ., ".txt"))
+    )
+  ) %>%
+  mutate(data = map(url, ~ read.delim(.x, header = TRUE, sep = "\t"))) 
+
+# Pull individual gene list 
+immport_genes_pulled<-immport_genes_df%>%
+  pull("data") 
+
+# Iterating to add immune activation type to each df 
+immport_list<-list()
+
+for( i in seq_along(immport_genes_pulled)){
+  immport_list[[i]]<- immport_genes_pulled[[i]] %>%
+    mutate(
+      activation_type = tibble_activation_immport[i]
+    )
+} 
+
+# Binding all rows 
+immport_df_concat<-immport_list %>%
+  list_rbind() %>%
+  rename(Genes= Symbol)
+
+markers_pathway_WT<-markers_pathway_WT %>%
+  full_join(immport_df_concat[, c(2,4,5)], by = "Genes")
+
 all_results<- add_column(all_results, Genes = rownames(all_results), .before = 1)
 names(count_data)[1]<-"Genes"
 
-# Aggregating pathway,marker, limma stats, count data 
+
+# Aggregating pathway,marker, limma stats, count data ########
 markers_pathway_WT <- pathway_genes_one_hot_encoded_WT_collapsed %>%
   pivot_longer(
     cols= c(12:363),
@@ -987,7 +1027,7 @@ for(term in search_order){
   pathways_of_interest<-c(pathways_of_interest, current_search)
 }
 
-# Subset and order selected pathways 
+# Subset and order selected pathways ########
 markers_selected_pathways_WT<-subset(markers_pathway_WT, Description %in% pathways_of_interest)
 markers_selected_pathways_WT <- markers_selected_pathways_WT %>% 
   mutate(Description = factor(Description, levels = unique(pathways_of_interest)))
@@ -1167,7 +1207,7 @@ ggplot(phagy_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
 
 dev.off()
 
-png(here("hTERT_RPE_1_WTvsXISTKD_versions ","plots", "protein_remodeling_pathway_marker.png"), width = 8000, height = 5000, res = 100)
+png(here("hTERT_RPE_1_WTvsXISTKD_versions ", "plots", "protein_remodeling_pathway_marker.png"), width = 8000, height = 5000, res = 100)
 ggplot(protein_remodeling_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
   geom_tile(aes(width = 0.9, height = 0.9)) +
   facet_wrap(~General_cell_type, scales = "free", ncol=3)+
@@ -1209,24 +1249,10 @@ ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill
 
 dev.off()
 
-all_gene_lists <- read_delim(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", "all_gene_lists.txt"), 
-                             delim = "\t", escape_double = FALSE, 
-                             trim_ws = TRUE)
 
-link_GO <- "https://s3.immport.org/release/genelists/current/"
-link_reactome <- "https://s3.immport.org/release/genelists/current/"
+  
+  
 
-
-all_gene_lists<-all_gene_lists %>%
-  mutate(
-    case_when(
-      str_detect(GO, "GO") ~map("GO:0002218", ~paste0(link_GO, .,".txt ")),
-      str_detect(GO, "Reactome") ~map("GO:0002218", ~paste0(link_reactome,.,".txt "))),
-      map("url", ~read.delim(url, header = TRUE, sep = "\t"))) %>%
-      map_dfr(~ tidy(.), .id = "variable") 
-
-
-names(all_gene_lists)[c(7,9)] <- c("link", "gene_list_explicit")
 
 # Retrieve each df from each row and concat the results then merge
 # with the master df markers_genes_general_pathway
