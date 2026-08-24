@@ -973,7 +973,8 @@ immport_genes_df <- all_gene_lists %>%
       str_detect(GO, "Reactome") ~ map("GO:0002218", ~ paste0(link_reactome, ., ".txt"))
     )
   ) %>%
-  mutate(data = map(url, ~ read.delim(.x, header = TRUE, sep = "\t"))) 
+  mutate(data = map(url, ~ read.delim(.x, header = TRUE, sep = "\t"))) %>%
+  rename(Activation_type =`Activation of innate immune response` )
 
 # Pull individual gene list 
 immport_genes_pulled<-immport_genes_df%>%
@@ -981,7 +982,7 @@ immport_genes_pulled<-immport_genes_df%>%
 
 # Iterating to add immune activation type to each df 
 immport_list<-list()
-
+tibble_activation_immport <- immport_genes_df$Activation_type
 for( i in seq_along(immport_genes_pulled)){
   immport_list[[i]]<- immport_genes_pulled[[i]] %>%
     mutate(
