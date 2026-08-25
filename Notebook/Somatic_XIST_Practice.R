@@ -954,6 +954,31 @@ pathway_genes_one_hot_encoded_WT_collapsed <- bind_cols(non_gene_data, collapsed
 # Assigning NA == 0
 pathway_genes_one_hot_encoded_WT_collapsed[is.na(pathway_genes_one_hot_encoded_WT_collapsed)] <-0
 
+# Retrieving GSEA do to add  to master df 
+gsea_separated_cols <-
+ gsea_do_gene_expanded<- gsea_do_df_all_results %>%
+                          select(11) %>%
+                          separate_wider_delim(1,delim = "/", names_sep = "", 
+                                                       too_few="align_start", names_repair = "universal" )  %>%
+                        dummy_cols(. , select_columns= names(.) , remove_selected_columns = TRUE)
+
+gsea_entrez_name_extracted <- gsub("[core_enrichment0-9]*_([0-9]*)", "\\1", names(gsea_do_gene_expanded))
+unique_entrez_gsea <- unique(gsea_entrez_name_extracted)
+  
+# Consolidate duplicated cols 
+consolidated_gsea_entrez_cols<- map_dfc(unique_entrez_gsea, function(p) {
+  cols_for_gsea <- gsea_do_gene_expanded [,  gsea_entrez_name_extracted== p, drop = FALSE]
+  tibble(!!p := as.integer(rowSums(cols_for_gsea) > 0))})
+
+# Assign 0 to NA values 
+consolidated_gsea_entrez_cols[is.na(consolidated_gsea_entrez_cols)]<-0 
+
+# Map entrez
+df_entrez_in_gsea<- subset(count_data_gene_entrez, ENTREZID %in% names(consolidated_gsea_entrez_cols))
+
+### Add the name of the genes back to the gsea df, then to the master df         ##########
+
+
 
 # Consolidating sources for robustness ############
 # Loading gene lists 
@@ -995,9 +1020,6 @@ immport_df_concat<-immport_list %>%
   list_rbind() %>%
   rename(Genes= Symbol)
 
-markers_pathway_WT<-markers_pathway_WT %>%
-  full_join(immport_df_concat[, c(2,4,5)], by = "Genes")
-
 all_results<- add_column(all_results, Genes = rownames(all_results), .before = 1)
 names(count_data)[1]<-"Genes"
 
@@ -1012,6 +1034,7 @@ markers_pathway_WT <- pathway_genes_one_hot_encoded_WT_collapsed %>%
     full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
     left_join(all_results[ , -(8)], by= "Genes") %>%
     left_join(count_data[ , 1:7], by = "Genes") %>%
+    full_join(immport_df_concat[, c(2,4,5)], by = "Genes")%>%
     mutate(
     WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
 
@@ -1065,7 +1088,7 @@ markers_genes_general_pathway<- markers_genes_expr_WT %>%
 # Gene and markers 
 ## Plotting Pathway and gene info colored by avg exp in WT 
 n_genes <- length(unique(markers_genes_general_pathway$Genes))
-n_markers<- length(unique(markers_genes_general_pathway$Marker))
+n_markers<- length(unique(markers_genes_general_pathway$Genes))
 
 px_per_gene <- 30
 px_per_markers <- 20
@@ -1240,13 +1263,17 @@ ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill
     axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
     axis.text.y = element_text(size = 14),
     axis.title = element_text(size = 16, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
     panel.grid = element_blank()
   ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
+  labs(x = "Markers", y = "Genes", fill = "logFC WT vs XIST KD", 
        title="Markers vs Genes in Endocrine Regulation colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 22))
+  theme(plot.title = element_text(hjust = 0.5, size = 22), 
+        plot.margin = margin(t = 10, r = 1, b = 1, l = 8, unit = "pt"),
+        legend.key.height = unit(4, "cm"),
+        legend.key.width = unit(2, "cm")  
+      )
 
 dev.off()
 
