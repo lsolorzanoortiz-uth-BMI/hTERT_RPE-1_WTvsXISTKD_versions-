@@ -1,5 +1,7 @@
+
 # Set CRAN mirror to avoid prompts during installation #####
-options(repos = c(CRAN = "https://cloud.r-project.org"), pkgType = "binary")
+options(repos = CRAN = "https://cloud.r-project.org")
+
 # Install WGCNA and dependencies from CRAN #####
 install.packages("WGCNA", dependencies = TRUE)
 
@@ -105,11 +107,10 @@ options(timeout = 1200)
 if(!dir.exists(here("GSE305810","/GSE305810"))){
 # Loading Data #####
 getGEOSuppFiles("GSE305810")
-
 }
 
 # Extract sample information (metadata) #####
-sample_info <- getGEO("GSE305810", GSEMatrix = TRUE)
+sample_info <- getGEO(filename= "/Users/luzsmac/Desktop/version_control/hTERT_RPE_1_GSE305810/GSE305810/GSE305810_all_samples_RPKM.txt.gz")
 sample_info <- pData(sample_info[[1]])
   
 # Read the count data file (In RPKM) #####
@@ -660,7 +661,7 @@ sig_genes_coordinates_unique_X_chrom[,'strand' ] <- as.character(sig_genes_coord
 write.table(here("hTERT_RPE_1_WTvsXISTKD_versions ","Data", sig_genes_coordinates_unique_X_chrom , file = "sig_genes_coordinates_unique_X_chrom.txt"),  col.names=TRUE, row.names= FALSE)
 
 
-# Subseting key genes 
+# Subseting key genes ############
 sig_results <- subset(all_results, adj.P.Val< 0.05) 
 vec_MIR <- grep("MIR", rownames(sig_results), value = TRUE)
 vec_IL <- grep("IL", rownames(sig_results), value = TRUE)
@@ -955,26 +956,34 @@ pathway_genes_one_hot_encoded_WT_collapsed <- bind_cols(non_gene_data, collapsed
 pathway_genes_one_hot_encoded_WT_collapsed[is.na(pathway_genes_one_hot_encoded_WT_collapsed)] <-0
 
 # Retrieving GSEA do to add  to master df 
-gsea_separated_cols <-
- gsea_do_gene_expanded<- gsea_do_df_all_results %>%
-                          select(11) %>%
-                          separate_wider_delim(1,delim = "/", names_sep = "", 
-                                                       too_few="align_start", names_repair = "universal" )  %>%
-                        dummy_cols(. , select_columns= names(.) , remove_selected_columns = TRUE)
 
-gsea_entrez_name_extracted <- gsub("[core_enrichment0-9]*_([0-9]*)", "\\1", names(gsea_do_gene_expanded))
+ gsea_do_gene_expanded<- gsea_do_df_all_results %>%
+                          select(c(1:2,11)) %>%
+                          separate_wider_delim(3,delim = "/", names_sep = "", 
+                                                       too_few="align_start", names_repair = "universal" )  %>%
+                        dummy_cols(., select_columns= names(.)[-c(1:2)] , remove_selected_columns = TRUE)
+              
+
+gsea_entrez_name_extracted <- gsub("[core_enrichment0-9]*_([0-9]*)", "\\1", names(gsea_do_gene_expanded)[-c(1,2)])
 unique_entrez_gsea <- unique(gsea_entrez_name_extracted)
-  
+
+gsea_do_gene_expanded <-  gsea_do_gene_expanded%>%
+                                    mutate(ID_copy = ID) %>% 
+                                    column_to_rownames(var = "ID_copy") %>%
+                                    select(-c(1,2))
+
 # Consolidate duplicated cols 
 consolidated_gsea_entrez_cols<- map_dfc(unique_entrez_gsea, function(p) {
-  cols_for_gsea <- gsea_do_gene_expanded [,  gsea_entrez_name_extracted== p, drop = FALSE]
+  cols_for_gsea <- gsea_do_gene_expanded[, gsea_entrez_name_extracted== p, drop = FALSE]
   tibble(!!p := as.integer(rowSums(cols_for_gsea) > 0))})
 
+### how to validate row position????
 # Assign 0 to NA values 
 consolidated_gsea_entrez_cols[is.na(consolidated_gsea_entrez_cols)]<-0 
 
 # Map entrez
-df_entrez_in_gsea<- subset(count_data_gene_entrez, ENTREZID %in% names(consolidated_gsea_entrez_cols))
+df_entrez_in_gsea<- subset(count_data_gene_entrez, ENTREZID %in% names(consolidated_gsea_entrez_cols)) %>%
+                    rename(Genes = SYMBOL)
 
 ### Add the name of the genes back to the gsea df, then to the master df         ##########
 
@@ -1035,6 +1044,7 @@ markers_pathway_WT <- pathway_genes_one_hot_encoded_WT_collapsed %>%
     left_join(all_results[ , -(8)], by= "Genes") %>%
     left_join(count_data[ , 1:7], by = "Genes") %>%
     full_join(immport_df_concat[, c(2,4,5)], by = "Genes")%>%
+    left_join(df_entrez_in_gsea[, c(1,2)], by= "Genes") %>%
     mutate(
     WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
 
@@ -1057,12 +1067,12 @@ markers_selected_pathways_WT <- markers_selected_pathways_WT %>%
   mutate(Description = factor(Description, levels = unique(pathways_of_interest)))
 
 markers_genes_expr_WT <-markers_selected_pathways_WT %>%
-  select(2,12,14,15,16) %>%
+  select(2,12,13,14,15,16,29,30,31) %>%
   pivot_longer(
     cols=c(3),
     values_to= "Markers"
   ) %>%
-  select(c(1,2,3,4,6))
+  select(1:8)
 
 markers_genes_general_pathway<- markers_genes_expr_WT %>%
   mutate(General_pathway = case_when(
