@@ -4,6 +4,10 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 # Install WGCNA and dependencies from CRAN #####
 install.packages("WGCNA", dependencies = TRUE)
 
+# Update packages without asking 
+update.packages(ask = FALSE, checkBuilt = TRUE, Ncpus = 4)
+
+# Install packages
 install.packages(c(
   "BiocManager",      # Manages the installation of Bioconductor 
   "ggplot2",          # For vizualization
@@ -1286,7 +1290,7 @@ ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill
 
 dev.off()
 
-### Splitting all pxathways 
+### Splitting all pathways 
   
 test_full_general_pathway_selection<-markers_genes_expr_WT %>%
     select(c(2,13,16:17,21,27:32)) %>%
