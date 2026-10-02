@@ -6,7 +6,7 @@ install.packages("WGCNA", dependencies = TRUE)
 
 # Update packages without asking 
 update.packages(ask = FALSE, checkBuilt = TRUE, Ncpus = 4)
-## update
+
 # Install packages
 install.packages(c(
   "BiocManager",      # Manages the installation of Bioconductor 
