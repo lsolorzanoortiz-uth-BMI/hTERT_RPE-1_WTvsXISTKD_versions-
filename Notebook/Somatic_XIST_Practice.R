@@ -1,11 +1,9 @@
+# Installation ########
 # Set CRAN mirror to avoid prompts during installation #####
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 # Install WGCNA and dependencies from CRAN #####
 install.packages("WGCNA", dependencies = TRUE)
-
-# Update packages without asking 
-update.packages(ask = FALSE, checkBuilt = TRUE, Ncpus = 4)
 
 # Install packages
 install.packages(c(
@@ -37,7 +35,7 @@ install.packages(c(
   "ggh4x",
   "here",
   "library"
-), force=TRUE)
+), update = TRUE, ask = FALSE)
 
 # Install Bioconductor packages #####
 BiocManager::install(c(
@@ -55,7 +53,7 @@ BiocManager::install(c(
   "ComplexHeatmap",   # To visualize clusters in count data 
   "ImmuneSigR",       # To get immune markers present in the sig results enriched in WT
   "omnideconv/immunedeconv" # To get immune scoring 
-), force = TRUE)
+), update = TRUE, ask = FALSE)
 
 # Load required libraries #####
 library(WGCNA)
@@ -128,6 +126,9 @@ count_data<-count_data %>%
 
 # Naming the rows #####                                                               
 rownames(count_data) <- count_data$Gene
+
+# Adding SYMBOL col
+count_data$SYMBOL<- count_data$Gene
 
 # Genes in count data#####
 write.table(here(count_data$Gene,"count_data_genes.txt"))
@@ -415,20 +416,19 @@ gene_clusters <- hc_genes |>
 
 # Cluster dataframe #####
 cluster_annotation<- data.frame(
-  SYMBOL = names(gene_clusters),
+  Gene = names(gene_clusters),
   Cluster = gene_clusters
 )
 
 # Reorder genes by cluster assignment #####
 deg_scaled_ordered<- matrix_sig_scaled %>% 
                                   data.frame() %>%  
-                                  filter(rownames(.) %in% cluster_annotation$SYMBOL)%>% 
+                                  filter(rownames(.) %in% cluster_annotation$Gene)%>% 
                                   mutate(
                                     WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE),
                                     KD_mean = rowMeans(pick("XISTAC1A5","XISTAC1B3","XISTAC2B2", "XISTAC2B4"),na.rm = TRUE)) 
 
-deg_scaled_ordered <-data.frame(deg_scaled_ordered[cluster_annotation$SYMBOL,], cluster_annotation$Cluster)
-
+deg_scaled_ordered <-data.frame(deg_scaled_ordered[cluster_annotation$Gene,], cluster_annotation$Cluster)
 
 # Calculate gap positions (where clusters change) #####
 gap_positions <- which(diff(cluster_annotation$Cluster) != 0)
@@ -458,19 +458,25 @@ dev.off()
 
 # Enrichment analysis
 # Convert gene symbols to Entrez IDs 
+# Adding a SYMBOL col
+cluster_annotation$SYMBOL <- cluster_annotation$Gene
+
 gene_entrez <- bitr(cluster_annotation$SYMBOL, 
                     fromType = "SYMBOL",
                     toType = "ENTREZID", 
                     OrgDb = org.Hs.eg.db)
 
 # Setting the row names to the symbols #####
-row.names(gene_entrez) <- gene_entrez$SYMBOL
+row.names(gene_entrez) <- gene_entrez$Gene
+
+#Adding Genes cols
+gene_entrez$Gene<- gene_entrez$SYMBOL
 
 # Saving entrez of clusters 
 write.table(here("Data","gene_entrez", "All_Clusters_entrez.txt"), sep="\t")
 
 #Getting the missing symbols #####
-missing_genes <- setdiff(cluster_annotation$SYMBOL, gene_entrez$SYMBOL)
+missing_genes <- setdiff(cluster_annotation$Gene, gene_entrez$Gene)
 
 # Saving Symbols not mapped for documentation purposes #####
 write.table(here("Data", missing_genes, "Genes_not_mapped_to_ENTREZID.txt"))
@@ -479,8 +485,8 @@ write.table(here("Data", missing_genes, "Genes_not_mapped_to_ENTREZID.txt"))
 cluster_1 <- subset(cluster_annotation, Cluster == 1)
 cluster_2 <- subset(cluster_annotation, Cluster == 2)
 
-gene_entrez_cluster_1 <- gene_entrez[cluster_1$SYMBOL, ]
-gene_entrez_cluster_2 <- gene_entrez[cluster_2$SYMBOL, ]
+gene_entrez_cluster_1 <- subset(gene_entrez,Gene %in% cluster_1$Gene)
+gene_entrez_cluster_2 <- subset(gene_entrez,Gene %in% cluster_2$Gene)
 
 # Perform GO enrichment for WT-associated module #####
 go_enrichment_cluster_1 <- enrichGO(
@@ -512,7 +518,6 @@ go_enrichment_cluster_2 <- enrichGO(
   qvalueCutoff = 0.05,
   readable = TRUE
 )
-count_data[,"SYMBOL"] <- count_data[,"Gene"]
 
 #GO Enrichment Barplot #####
 png(here("plots", "GO_enrichment_barplot_cluster_1_GSE305810.png"),
@@ -537,17 +542,22 @@ count_data_gene_entrez <- bitr(count_data$SYMBOL,
                                OrgDb = org.Hs.eg.db)
 
 # Check for NA and duplicates 0.01% not mapped 
+count_data_gene_entrez$Gene <- count_data_gene_entrez$SYMBOL
 count_data_gene_entrez<- count_data_gene_entrez[!is.na(count_data_gene_entrez$ENTREZID),]
 count_data_gene_entrez<- count_data_gene_entrez[!duplicated(count_data_gene_entrez$ENTREZID),]
-count_data_gene_entrez<- count_data_gene_entrez[!duplicated(count_data_gene_entrez$SYMBOL),]
+count_data_gene_entrez<- count_data_gene_entrez[!duplicated(count_data_gene_entrez$Gene),]
 
-# Rename rows on gee entrez count data
-rownames(count_data_gene_entrez) <- count_data_gene_entrez$SYMBOL
+# Adding the Gene col
+all_results<- add_column(all_results, Gene = rownames(all_results), .before = 1)
 
 # Prepare for enrichment analysis 
-count_data_gene_entrez <- cbind(count_data_gene_entrez[rownames(count_data_gene_entrez),], all_results[rownames(count_data_gene_entrez), ]) 
-gene_entrez_t <- count_data_gene_entrez$t
-names(gene_entrez_t) <- count_data_gene_entrez$ENTREZID
+ENTREZID<-count_data_gene_entrez$ENTREZID
+gene_entrez_t<-count_data_gene_entrez%>%
+  filter(Gene %in% all_results$Gene)%>%
+  right_join(all_results, by= "Gene") %>%
+  pull(6)%>%
+  as.vector()%>%
+  setNames(.,ENTREZID)
 
 # Gse enrichment 
 gsea_do <- gseDO(
@@ -572,7 +582,6 @@ ridgeplot(sig_gsea, showCategory = 35, orderBy= "NES", fill= "p.adjust")+
   theme(axis.text.y = element_text(size = 26))
 
 dev.off()
-
 
 # Df of differentially expressed genes and chroms #####
 sig_genes_df <- data.frame(
@@ -661,7 +670,7 @@ sig_genes_coordinates_unique_X_chrom <- filter(data.frame(sig_genes_coordinates_
 sig_genes_coordinates_unique_X_chrom[,'strand' ] <- as.character(sig_genes_coordinates_unique_X_chrom[,'strand' ])
 
 # Saving 
-write.table(here("Data", sig_genes_coordinates_unique_X_chrom , file = "sig_genes_coordinates_unique_X_chrom.txt"),  col.names=TRUE, row.names= FALSE)
+write.table(here("Data", sig_genes_coordinates_unique_X_chrom ,"sig_genes_coordinates_unique_X_chrom.txt"),  col.names=TRUE, row.names= FALSE)
 
 
 # Subseting key genes ############
@@ -728,13 +737,13 @@ gsea_do_df_all_results <- as.data.frame(gsea_do)
 all_markers <- Get_Markers()
 
 all_markers_df <- data.frame(Marker = names(unlist(all_markers)),
-                             Genes = unname(unlist(all_markers)))
+                             Gene = unname(unlist(all_markers)))
 
 # Subset Markers in cluster 1 (WT)
-all_markers_df_cluster_WT <- subset(all_markers_df, Genes %in% cluster_1$SYMBOL)
+all_markers_df_cluster_WT <- subset(all_markers_df, Gene %in% cluster_1$SYMBOL)
 
 # Retrieve stats for markers
-all_markers_df_cluster_WT_limma_stats <- data.frame(all_markers_df_cluster_WT, sig_results[all_markers_df_cluster_WT$Genes, c(1,5)])
+all_markers_df_cluster_WT_limma_stats <- data.frame(all_markers_df_cluster_WT, sig_results[all_markers_df_cluster_WT$Gene, c(1,5)])
 
 # Clean list of markers 
 all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_WT$Marker)
@@ -745,10 +754,10 @@ all_markers_df_cluster_WT_limma_stats$Markers_cleaned<-gsub("__","_",all_markers
 
 
 # Subset Markers in cluster 1 (XISTKD)
-all_markers_df_cluster_XISTKD <- subset(all_markers_df, Genes %in% cluster_2$SYMBOL)
+all_markers_df_cluster_XISTKD <- subset(all_markers_df, Gene %in% cluster_2$SYMBOL)
 
 # Retrieve stats for markers
-all_markers_df_cluster_XISTKD_limma_stats <- data.frame(all_markers_df_cluster_XISTKD, sig_results[all_markers_df_cluster_XISTKD$Genes, c(1,5)])
+all_markers_df_cluster_XISTKD_limma_stats <- data.frame(all_markers_df_cluster_XISTKD, sig_results[all_markers_df_cluster_XISTKD$Gene, c(1,5)])
 
 # Clean list of markers 
 all_markers_df_cluster_XISTKD_limma_stats$Markers_cleaned<-gsub("^(.+)_PMID.+","\\1",all_markers_df_cluster_XISTKD$Marker)
@@ -959,37 +968,13 @@ pathway_genes_one_hot_encoded_WT_collapsed <- bind_cols(non_gene_data, collapsed
 pathway_genes_one_hot_encoded_WT_collapsed[is.na(pathway_genes_one_hot_encoded_WT_collapsed)] <-0
 
 # Retrieving GSEA do to add  to master df 
-
- gsea_do_gene_expanded<- gsea_do_df_all_results %>%
-                          select(c(1:2,11)) %>%
-                          separate_wider_delim(3,delim = "/", names_sep = "", 
-                                                       too_few="align_start", names_repair = "universal" )  %>%
-                        dummy_cols(., select_columns= names(.)[-c(1:2)] , remove_selected_columns = TRUE)
-              
-
-gsea_entrez_name_extracted <- gsub("[core_enrichment0-9]*_([0-9]*)", "\\1", names(gsea_do_gene_expanded)[-c(1,2)])
-unique_entrez_gsea <- unique(gsea_entrez_name_extracted)
-
-gsea_do_gene_expanded <-  gsea_do_gene_expanded%>%
-                                    mutate(ID_copy = ID) %>% 
-                                    column_to_rownames(var = "ID_copy") %>%
-                                    select(-c(1,2))
-
-# Consolidate duplicated cols 
-consolidated_gsea_entrez_cols<- map_dfc(unique_entrez_gsea, function(p) {
-  cols_for_gsea <- gsea_do_gene_expanded[, gsea_entrez_name_extracted== p, drop = FALSE]
-  tibble(!!p := as.integer(rowSums(cols_for_gsea) > 0))})
-
-### how to validate row position????
-# Assign 0 to NA values 
-consolidated_gsea_entrez_cols[is.na(consolidated_gsea_entrez_cols)]<-0 
-
-# Map entrez
-df_entrez_in_gsea<- subset(count_data_gene_entrez, ENTREZID %in% names(consolidated_gsea_entrez_cols)) %>%
-                    rename(Genes = SYMBOL)
-
-### Add the name of the genes back to the gsea df, then to the master df         ##########
-
+consolidated_gsea_entrez_cols <- gsea_do_df_all_results %>%
+  select(1:2, 11) %>%
+  rename(ENTREZID = 3, GSEA_disease=2) %>%
+  separate_longer_delim(ENTREZID, delim = "/") %>%
+  mutate(present = 1L)%>%
+  select(-4) %>%
+  left_join(gene_entrez, by="ENTREZID")
 
 
 # Consolidating sources for robustness ############
@@ -1030,65 +1015,51 @@ for( i in seq_along(immport_genes_pulled)){
 # Binding all rows 
 immport_df_concat<-immport_list %>%
   list_rbind() %>%
-  rename(Genes= Symbol)
-
-all_results<- add_column(all_results, Genes = rownames(all_results), .before = 1)
-names(count_data)[1]<-"Genes"
-
+  rename(Gene= Symbol)
 
 # Aggregating pathway,marker, limma stats, count data ########
  markers_pathway_WT<- pathway_genes_one_hot_encoded_WT_collapsed %>%
   pivot_longer(
     cols= c(12:363),
-    names_to= "Genes",
+    names_to= "Gene",
     values_to= "value") %>%
     filter(value ==1) %>%
-    full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Genes") %>%
-    left_join(all_results[ , -(8)], by= "Genes") %>%
-    left_join(count_data[ , 1:7], by = "Genes") %>%
-    full_join(immport_df_concat[, c(2,4,5)], by = "Genes")%>%
-    left_join(df_entrez_in_gsea[, c(1,2)], by= "Genes") %>%
+    full_join(all_markers_df_cluster_WT_limma_stats[c(1,2,5)],by="Gene") %>%
+    left_join(all_results[ , -(8)], by= "Gene") %>%
+    left_join(count_data[ , 1:7], by = "Gene") %>%
+    full_join(immport_df_concat[, c(2,4,5)], by = "Gene")%>%
+    left_join(consolidated_gsea_entrez_cols[, c(2,3,5)], by= "Gene") %>%
     mutate(
     WT_mean= rowMeans(pick("WT1", "WT2", "WT3"),na.rm = TRUE))
 
 # Quick look at the available pathways for WT   
 unique_pathway_WT<-data.frame(unique(markers_pathway_WT$Description))
-
-# Retrieve the pathways of interest
-pathways_of_interest<- c()
-search_order<-c("hypoxia", "protein", "deubiquitination","apopt", "membrane fusion",
-                "phagy", "hormone", "steroid", "estradiol", "insulin", "oxygen")
-
-for(term in search_order){
-  current_search<-grep(term, markers_pathway_WT$Description, value=TRUE)
-  pathways_of_interest<-c(pathways_of_interest, current_search)
-}
-
-# Subset and order selected pathways ########
-markers_selected_pathways_WT<-subset(markers_pathway_WT, Description %in% pathways_of_interest)
-markers_selected_pathways_WT <- markers_selected_pathways_WT %>% 
-  mutate(Description = factor(Description, levels = unique(pathways_of_interest)))
-
-markers_genes_expr_WT <-markers_selected_pathways_WT %>%
-  select(c(2,13,16:17,21,27:32)) %>%
-  pivot_longer(
-    cols=c(3),
-    values_to= "Markers_cleaned"
-  ) %>%
-  select(-11)
-
-markers_genes_general_pathway<- markers_genes_expr_WT %>%
+which(names(markers_pathway_WT)=="logFC")
+# Splitting all pathways ########
+ All_general_pathways_general_markers <- markers_pathway_WT  %>%
+   select(c(2,13,16:18,21,27:33)) %>%
   mutate(General_pathway = case_when(
-    str_detect(Description, "(?i)hypoxia") ~ "oxygen_regulation",
-    str_detect(Description, "(?i)protein") ~ "protein_remodeling",
+    str_detect(Description, "(?i)hypoxia|peroxide|detoxification") ~ "oxygen_regulation",
+    str_detect(Description, "(?i)protein|phosphorylation|peptidyl|translational") ~ "protein_remodeling",
     str_detect(Description, "(?i)apopt") ~ "apoptosis",
-    str_detect(Description, "(?i)fusion") ~ "membrane_fusion",
+    str_detect(Description, "(?i)fusion|syncytium|cytoplasmic|actin|fiber|membrane|translational|transport") ~ "membrane_fusion",
     str_detect(Description, "(?i)phagy") ~ "phagy",
     str_detect(Description, "(?i)hormone") ~ "endocrine_regulation",
     str_detect(Description, "(?i)steroid") ~ "endocrine_regulation",
     str_detect(Description, "(?i)estradiol") ~ "endocrine_regulation",
     str_detect(Description, "(?i)insulin") ~ "endocrine_regulation",
-    str_detect(Description, "(?i)oxygen") ~ "oxygen_regulation"), 
+    str_detect(Description, "(?i)insulin|gluco|glyco") ~ "glucose_regulation",
+    str_detect(Description, "(?i)oxygen") ~ "oxygen_regulation",
+    str_detect(Description, "(?i)muscle|myoblast|myotube|actin|actomyosin") ~ "muscle_processes",
+    str_detect(Description, "(?i)metab") ~ "metabolic_processes",
+    str_detect(Description, "(?i)respiration") ~ "respiration_processes",
+    str_detect(Description, "(?i)catab") ~ "catabolic_processes",
+    str_detect(Description, "(?i)nutrient|starvation|vitamin|carbohydrate") ~ "nutrient_processes",
+    str_detect(Description, "(?i)NADPH|fatty|mitochondria|energy") ~ "energy_regulation",
+    str_detect(Description, "(?i)stress|mechanical|toxic|arsenic") ~ "stress_regulation",
+    str_detect(Description, "(?i)transport") ~ "transport_regulation",
+    str_detect(Description, "(?i)circadian|photoperiod") ~ "circadian_regulation",
+    str_detect(Description, "(?i)junction|growth|adhesion|transport|differentiation|signaling|proliferation|transcription") ~ "cell_processes"),
     General_cell_type = case_when(
     str_detect(Markers_cleaned, "(?i)T_cell|Tcell|CD4|CD8|Treg|reg|Regulatory|Killer|Helper|TH") ~ "T-cell",
     str_detect(Markers_cleaned, "(?i)B_cell|bcell|Plasma|B_cell") ~ "B-cell",
@@ -1097,246 +1068,121 @@ markers_genes_general_pathway<- markers_genes_expr_WT %>%
     str_detect(Markers_cleaned, "(?i)phil|Mast|NK") ~ "Weakly_phagocytic",
     str_detect(Markers_cleaned, "(?i)Myeloid|BALF") ~ "Myeloid",
     str_detect(Markers_cleaned, "(?i)Anergy|Glycolysis") ~ "Energy"))
+####################
+BiocManager::install("decoupleR")???????????????
+library(decoupleR)
+#####################
 
-# Gene and markers 
-## Plotting Pathway and gene info colored by avg exp in WT 
-n_genes <- length(unique(markers_genes_general_pathway$Genes))
-n_markers<- length(unique(markers_genes_general_pathway$Genes))
+library(ggplot2)
+library(dplyr)
+library(ggh4x)
+library(here)
 
-px_per_gene <- 30
-px_per_markers <- 20
-res_val <- 100
+## Used Claude to plot, used to edit and fix synthax #######
 
-plot_width  <- max(8000, n_genes * px_per_gene)
-plot_height <- max(4000, n_markers * px_per_markers)
+# Split by General pathway or GSEA disease ######## 
 
-png(here("plots","marker_genes.png"), width = plot_width, height = plot_height, res = res_val)
+# Split function ########
+ split_dfs<- function(split_type){
+   if(split_type == "General_pathway"){
+  list_with_splits <- All_general_pathways_general_markers %>%
+  group_by(General_pathway) %>%
+  group_split()
+   }
+   else{
+  list_with_splits <- All_general_pathways_general_markers %>%
+  group_by(GSEA_disease) %>%
+  group_split()
+      
+   }
+   return(list_with_splits)
+ }
+# Calling Split function ########
 
-ggplot(markers_genes_general_pathway, aes(Genes, Description,fill = logFC)) + 
-  geom_tile(aes(width = 0.9, height = 0.9)) + 
-  facet_wrap(~General_cell_type, scales = "free",  ncol =2)+
-  force_panelsizes(rows = c(5,5,5,5), cols = c(1, 1, 1))+
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 14) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
-    axis.text.y = element_text(size = 16),
-    axis.title = element_text(size = 14, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Genes", y = "Marker", fill = "logFC", 
-       title="Avg WT expression of each gene in apoptosis and pyroptosis related markers")+
-  theme(plot.title = element_text(hjust = 0.5, size = 18))
+ list_pathway_split<-split_dfs("General_pathway")
+  list_GSEA_split<-split_dfs("GSEA_disease")
 
-dev.off()    
-
-cell_order<- c("Energy", "Dendritic",
-               "Weakly_phagocytic",
-               "Macrophage", "T-cell", "B-cell",
-               "Myeloid")
-
-
-# Splitting by general pathway description
-markers_genes_expr_WT_split<-markers_genes_general_pathway %>%
-  mutate(General_pathway= factor(General_pathway, levels=unique(markers_genes_general_pathway$General_pathway))) %>%
-  arrange(General_pathway,General_cell_type ) %>%
-  mutate(
-    General_pathway = factor(General_pathway),
-    General_cell_type = factor(General_cell_type, levels = cell_order)) %>%
-  group_split(General_pathway)
-
-#Retrieving pathway splits 
-pathways<- unique(markers_genes_general_pathway$General_pathway)
-
-splitting <- function(x, pathway) {
-   current_df <- data.frame(x)
-    assign(paste0(pathway, "_pathway_df"), x, envir = .GlobalEnv)
-}
-
-for(i in seq_along(pathways)){
-  splitting(markers_genes_expr_WT_split[[i]], pathways[i])
-}
-
-#### Re-cluster!!!!
-png(here("plots","oxygen_regulation_pathway_marker.png"), width = 15000, height = 17000, res = 300)
-ggplot(oxygen_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9))+
-  facet_wrap(~General_cell_type, scales = "free")+
-  force_panelsizes(rows = c(2, 8, 2), cols = c(1, 1, 1))+
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-    axis.text.y = element_text(size = 18),
-    axis.title = element_text(size = 14, face = "bold"),
-    legend.title = element_text(size = 14),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
-       title="Markers vs Genes in Hypoxia colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 22))
-
-dev.off()
-
-
-png(here("plots","apoptosis_pathway_marker.png"), width = 8000, height = 5000, res = 100)
-ggplot(apoptosis_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9)) +
-  facet_wrap(~General_cell_type, scales = "free")+
-  force_panelsizes(rows = c(2, 8, 2), cols = c(1, 1, 1))+
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-    axis.text.y = element_text(size = 18),
-    axis.title = element_text(size = 16, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
-       title="Markers vs Genes in Apoptosis colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 18))
-
-dev.off()
-
-png(here("plots","membrane_fusion_pathway_marker.png"), width = 8000, height = 5000, res = 100)
-ggplot(membrane_fusion_pathway_df, aes(x = Markers_cleaned, y = Genes, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9)) +
-  facet_wrap(~General_cell_type, scales = "free")+                                       
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-    axis.text.y = element_text(size = 18),
-    axis.title = element_text(size = 14, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
-       title="Markers vs Genes in Membrane Fusion colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 22))
-
-dev.off()
-
-png(here("plots","phagy_pathway_marker.png"), width = 8000, height = 5000, res = 100)
-ggplot(phagy_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9)) +
-  facet_wrap(~General_cell_type, scales = "free", ncol=2)+
-  force_panelsizes(rows = c(2, 8, 2), cols = c(1,1)) +
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 22) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 18),
-    axis.text.y = element_text(size = 18),
-    axis.title = element_text(size = 22, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
-       title="Markers vs Genes in Phagy colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 24))
-
-dev.off()
-
-png(here("plots", "protein_remodeling_pathway_marker.png"), width = 8000, height = 5000, res = 100)
-ggplot(protein_remodeling_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9)) +
-  facet_wrap(~General_cell_type, scales = "free", ncol=3)+
-  force_panelsizes(rows = c(2, 8, 2), cols = c(1,1)) +
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-    axis.text.y = element_text(size = 14),
-    axis.title = element_text(size = 16, face = "bold"),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC", 
-       title="Markers vs Genes in Protein Remodeling colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 22))
-
-dev.off()
-
-png(here("plots","endocrine_regulation.png"), width = 10000, height = 8000,res = 200)
-ggplot(endocrine_regulation_pathway_df, aes(x = Genes, y = Markers_cleaned, fill = logFC)) +
-  geom_tile(aes(width = 0.9, height = 0.9)) +
-  facet_wrap(~General_cell_type, scales = "free", ncol=3)+
-  force_panelsizes(rows = c(2, 10), cols = c(1,1)) +
-  scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
-  theme_minimal(base_size = 16) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-    axis.text.y = element_text(size = 14),
-    axis.title = element_text(size = 16, face = "bold"),
-    legend.title = element_text(size = 16),
-    legend.text = element_text(size = 14),
-    panel.grid = element_blank()
-  ) +
-  labs(x = "Markers", y = "Genes", fill = "logFC WT vs XIST KD", 
-       title="Markers vs Genes in Endocrine Regulation colored by Log Fc WT vs XIST KD")+
-  theme(plot.title = element_text(hjust = 0.5, size = 22), 
-        plot.margin = margin(t = 10, r = 1, b = 1, l = 8, unit = "pt"),
-        legend.key.height = unit(4, "cm"),
-        legend.key.width = unit(2, "cm")  
-      )
-
-dev.off()
-
-### Splitting all pathways 
+#Plotting #########
+  plotting_splits <- function(df, split_type){
+    # Retrieving unique splits
+    unique_split_names <- unique(df[,split_type])[1]
   
-test_full_general_pathway_selection<-markers_genes_expr_WT %>%
-    select(c(2,13,16:17,21,27:32)) %>%
-  mutate(General_pathway = case_when(
-    str_detect(Description, "(?i)hypoxia") ~ "oxygen_regulation",
-    str_detect(Description, "(?i)protein") ~ "protein_remodeling",
-    str_detect(Description, "(?i)apopt") ~ "apoptosis",
-    str_detect(Description, "(?i)fusion|syncytium") ~ "membrane_fusion",
-    str_detect(Description, "(?i)phagy") ~ "phagy",
-    str_detect(Description, "(?i)hormone") ~ "endocrine_regulation",
-    str_detect(Description, "(?i)steroid") ~ "endocrine_regulation",
-    str_detect(Description, "(?i)estradiol") ~ "endocrine_regulation",
-    str_detect(Description, "(?i)insulin") ~ "endocrine_regulation",
-    str_detect(Description, "(?i)insulin|gluco|glyco") ~ "glucose_regulation",
-    str_detect(Description, "(?i)oxygen") ~ "oxygen_regulation",
-    str_detect(Description, "(?i)cytoplasmic") ~ "cytoplasmic_processes",
-    str_detect(Description, "(?i)muscle") ~ "muscle_processes",
-    str_detect(Description, "(?i)metab") ~ "metabolic_processes",
-    str_detect(Description, "(?i)catab") ~ "catabolic_processes)))
-  
-    
-    General_cell_type = case_when(
-    str_detect(Markers_cleaned, "(?i)T_cell|Tcell|CD4|CD8|Treg|reg|Regulatory|Killer|Helper|TH" ~ "T-cell",
-    str_detect(Markers_cleaned, "(?i)B_cell|bcell|Plasma|B_cell" ~ "B-cell",
-    str_detect(Markers_cleaned, "(?i)TAM|Macrophage|M|Monocyte" ~ "Macrophage",
-    str_detect(Markers_cleaned, "(?i)Dendritic|DC" ~"Dendritic",
-    str_detect(Markers_cleaned, "(?i)phil|Mast|NK" ~ "Weakly_phagocytic",
-    str_detect(Markers_cleaned, "(?i)Myeloid|BALF" ~ "Myeloid",
-    str_detect(Markers_cleaned, "(?i)Anergy|Glycolysis" ~ "Energy"))
+  ggplot(df, aes(x = Gene, y = Markers_cleaned, fill = logFC)) +
+    geom_tile(aes(width = 0.9, height = 0.9)) +
+    facet_wrap(~General_cell_type, scales = "free", ncol = 3) +
+    force_panelsizes(rows = c(2, 10), cols = c(1, 1)) +
+    scale_fill_stepsn(n.breaks = 15, colours = c("#FFB6C1", "#DA70D6", "#4B0082")) +
+    theme_minimal(base_size = 16) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+      axis.text.y = element_text(size = 14),
+      axis.title = element_text(size = 16, face = "bold"),
+      legend.title = element_text(size = 16),
+      legend.text = element_text(size = 14),
+      panel.grid = element_blank()
+    ) +
+    labs(x = "Genes", y = "Markers Cleaned", fill = "logFC WT vs XIST KD", 
+         title = paste0("Genes vs Markers Cleaned in ", unique_split_names)) +   ### Update name!!!
+    theme(plot.title = element_text(hjust = 0.5, size = 22), 
+          plot.margin = margin(t = 10, r = 1, b = 1, l = 8, unit = "pt"),
+          legend.key.height = unit(4, "cm"),
+          legend.key.width = unit(2, "cm")  
+    )
+  }
+# Calling the plot function ########
 
- not_selected_pathways<- markers_pathway_WT%>%
-  filter(!str_detect(Description,
-    "hypoxia|protein|apopt|fusion|phagy|hormone|steroid|estradiol|insulin|oxygen")) %>%
-   select(2)%>%
-    unique()
+splits<- list()
+splits[[1]]<- list_GSEA_split
+splits[[2]]<-list_pathway_split
+all_plots<- list()
 
-unique(grep("metabolic",markers_pathway_WT$Description, value=TRUE))
-   
-# Retrieve each df from each row and concat the results then merge
-# with the master df markers_genes_general_pathway
+unique_GSEA<-list_GSEA_split%>%
+  list_rbind()%>%
+  pull(GSEA_disease)%>%
+  unique() 
+clean_name_unique_gsea<-gsub(" ", "_",unique_GSEA )
 
-## order each facet_wrap by cell type
-## Make sense of markers in selected pathways
-## How are hormones affecting immune cells?
+clean_name_unique_gsea[[1]]
+unique_pathway<-list_pathway_split%>%
+  list_rbind()%>%
+  pull(General_pathway)%>%
+  unique() 
+
+
+  if (!dir.exists(here("plots"))){
+    dir.create(here("plots"), recursive = TRUE)}
+    for(i in seq_along(splits)){
+      list_with_splits<- splits[[i]]
+    for(i in seq_along(list_with_splits)){
+      #Retrieving current split
+      current_df <-list_with_splits[[i]]
+      ##calling plotting_pathways function
+      p <- plotting_splits(data.frame(current_df), split_type)
+      all_plots[[i]] <- p ## Update all-plots so that pathways are also saved 
+
+      #Saving plots
+      png_path <- here("plots", paste0(clean_name_unique_gsea[[i]], ".png"))
+      png(png_path, width = 10000, height = 8000, res = 200)
+      print(all_plots[[i]])
+
+      dev.off()
+    }}
+
+
+
+
+
+calling_plotting(list_GSEA_split)
+calling_plotting(list_pathway_split)
+# TO DO ########
+# Do the same but split by disease 
+# Plot cell death type 
+# Look at cell deathz and disease?? 
+
 # Clean and extract genes that contribute to disease
 # Look at which genes are contributing to disease and sig enrichment pathways 
+
+## How are hormones affecting immune cells?
 # Look which sig immune genes are in the same TAD, same TAD activation of sig genes
 # Map by these sig genes and their TAD by coordinate 
 # Description for each biomarker found to be sig 
