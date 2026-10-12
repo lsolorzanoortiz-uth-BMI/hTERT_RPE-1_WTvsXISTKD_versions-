@@ -1083,29 +1083,24 @@ library(here)
 # Split by General pathway or GSEA disease ######## 
 
 # Split function ########
- split_dfs<- function(split_type){
-   if(split_type == "General_pathway"){
-  list_with_splits <- All_general_pathways_general_markers %>%
+ split_dfs<- function(df){
+   splits<- list() 
+  list_pathway_split <- df %>%
   group_by(General_pathway) %>%
   group_split()
-   }
-   else{
-  list_with_splits <- All_general_pathways_general_markers %>%
+   
+retrieve_splits_list <- df %>%
   group_by(GSEA_disease) %>%
   group_split()
-      
-   }
-   return(list_with_splits)
+   splits[[1]]<-list_pathway_split
+   splits[[2]]<- list_GSEA_split
+   return(splits) 
  }
-# Calling Split function ########
-
- list_pathway_split<-split_dfs("General_pathway")
-  list_GSEA_split<-split_dfs("GSEA_disease")
 
 #Plotting #########
   plotting_splits <- function(df, split_type){
     # Retrieving unique splits
-    unique_split_names <- unique(df[,split_type])[1]
+    current_split_name <- unique(df[,split_type])[1]
   
   ggplot(df, aes(x = Gene, y = Markers_cleaned, fill = logFC)) +
     geom_tile(aes(width = 0.9, height = 0.9)) +
@@ -1122,7 +1117,7 @@ library(here)
       panel.grid = element_blank()
     ) +
     labs(x = "Genes", y = "Markers Cleaned", fill = "logFC WT vs XIST KD", 
-         title = paste0("Genes vs Markers Cleaned in ", unique_split_names)) +   ### Update name!!!
+         title = paste0("Genes vs Markers Cleaned in ", current_split_name)) +
     theme(plot.title = element_text(hjust = 0.5, size = 22), 
           plot.margin = margin(t = 10, r = 1, b = 1, l = 8, unit = "pt"),
           legend.key.height = unit(4, "cm"),
@@ -1131,28 +1126,29 @@ library(here)
   }
 # Calling the plot function ########
 
-splits<- list()
-splits[[1]]<- list_GSEA_split
-splits[[2]]<-list_pathway_split
-all_plots<- list()
-
-unique_GSEA<-list_GSEA_split%>%
+all_plots<- list() ### Need to fix the split type return################!!!!!!!!!!!!!!
+split_type_retrieval<- function(list_with_splits){
+ if(unique(list_with_splits[[1]]$General_pathway)==1){
+   return("General_pathway")
+ }
+  else{ return("GSEA_disease")}
+}
+retrieve_unique_split<-function(list, split_type){
+  unique_split<-list%>%
   list_rbind()%>%
-  pull(GSEA_disease)%>%
-  unique() 
-clean_name_unique_gsea<-gsub(" ", "_",unique_GSEA )
-
-clean_name_unique_gsea[[1]]
-unique_pathway<-list_pathway_split%>%
-  list_rbind()%>%
-  pull(General_pathway)%>%
-  unique() 
+  pull({{split_type}})%>%
+  unique()
+ cleaned_unique_split<- gsub("[-,_]", " ", str_trim(unique_split))
+cleaned_unique_split<- gsub(" ", "_",cleaned_unique_split)}
 
 
   if (!dir.exists(here("plots"))){
     dir.create(here("plots"), recursive = TRUE)}
+      splits<-split_dfs(All_general_pathways_general_markers)
     for(i in seq_along(splits)){
       list_with_splits<- splits[[i]]
+      split_type<-split_type_retrieval(list_with_splits)
+      unique_split<-retrieve_unique_split(list_with_splits, split_type)
     for(i in seq_along(list_with_splits)){
       #Retrieving current split
       current_df <-list_with_splits[[i]]
@@ -1161,19 +1157,13 @@ unique_pathway<-list_pathway_split%>%
       all_plots[[i]] <- p ## Update all-plots so that pathways are also saved 
 
       #Saving plots
-      png_path <- here("plots", paste0(clean_name_unique_gsea[[i]], ".png"))
+      png_path <- here("plots", paste0(unique_split[[i]], ".png"))
       png(png_path, width = 10000, height = 8000, res = 200)
       print(all_plots[[i]])
 
       dev.off()
     }}
 
-
-
-
-
-calling_plotting(list_GSEA_split)
-calling_plotting(list_pathway_split)
 # TO DO ########
 # Do the same but split by disease 
 # Plot cell death type 
@@ -1193,3 +1183,4 @@ calling_plotting(list_pathway_split)
 # Cytokines 
 # Stats for marker count in each group 
 
+  
